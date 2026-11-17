@@ -12,6 +12,13 @@ export function Footer() {
         <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
           <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-2 text-[#111111] dark:text-[#F5F5F5]">
+              <img
+                src="/logo.svg"
+                alt="DROPZERO logo"
+                width={20}
+                height={20}
+                className="h-5 w-5 rounded shrink-0"
+              />
               <span className="font-mono text-sm font-semibold tracking-[0.14em] uppercase">
                 DROPZERO
               </span>

@@ -1,0 +1,17 @@
+{
+  "name": "DROPZERO — Transfer without limits.",
+  "short_name": "DROPZERO",
+  "description": "Transfer without limits. Fast, private, cross-platform peer-to-peer file transfer with direct WebRTC and native QUIC.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080808",
+  "theme_color": "#080808",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "DROPZERO",
+  "description": "Transfer without limits. Fast, private, cross-platform peer-to-peer file transfer with direct WebRTC and native QUIC.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

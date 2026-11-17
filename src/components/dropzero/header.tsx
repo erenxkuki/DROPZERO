@@ -1,0 +1,138 @@
+import React, { useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { Menu, X } from 'lucide-react';
+import { cn } from '@/src/lib/utils';
+import { ThemeSwitcher } from '@/src/components/ui/theme-switcher';
+import { Button } from '@/src/components/ui/button';
+
+const NAV_LINKS = [
+  { href: '/transfer', label: 'Transfer' },
+  { href: '/devices', label: 'Devices' },
+  { href: '/history', label: 'History' },
+  { href: '/features', label: 'Features' },
+  { href: '/security', label: 'Security' },
+  { href: '/download', label: 'Download' },
+];
+
+export function Header() {
+  const { pathname } = useLocation();
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  return (
+    <header className="sticky top-0 z-40 h-16 border-b border-[#E5E5E5] dark:border-[#252525] bg-[#FAFAFA]/90 dark:bg-[#080808]/90 backdrop-blur-md">
+      <div className="mx-auto flex h-full max-w-[1200px] items-center justify-between gap-4 px-4 sm:px-6">
+        <Link
+          to="/"
+          onClick={() => setMobileOpen(false)}
+          className="inline-flex items-center gap-2.5 text-[#111111] dark:text-[#F5F5F5] whitespace-nowrap shrink-0"
+        >
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+            className="shrink-0"
+          >
+            <rect
+              x="2"
+              y="2"
+              width="20"
+              height="20"
+              rx="4"
+              stroke="currentColor"
+              strokeWidth="1.75"
+            />
+            <path
+              d="M7 12H17M17 12L13 8M17 12L13 16"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span className="font-mono text-sm font-semibold tracking-[0.14em] uppercase">
+            DROPZERO
+          </span>
+        </Link>
+
+        <nav
+          aria-label="Primary navigation"
+          className="hidden md:flex items-center gap-6"
+        >
+          {NAV_LINKS.map((item) => {
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                to={item.href}
+                className={cn(
+                  'text-xs font-medium transition-colors duration-150 whitespace-nowrap shrink-0',
+                  active
+                    ? 'text-[#111111] dark:text-[#F5F5F5]'
+                    : 'text-[#666666] dark:text-[#929292] hover:text-[#111111] dark:hover:text-[#F5F5F5]'
+                )}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <ThemeSwitcher compact />
+          <Link to="/settings" className="hidden sm:inline-flex shrink-0">
+            <Button variant="ghost" size="sm">
+              Settings
+            </Button>
+          </Link>
+          <Link to="/transfer" className="hidden sm:inline-flex shrink-0">
+            <Button variant="primary" size="sm">
+              Start Transfer
+            </Button>
+          </Link>
+          <button
+            type="button"
+            aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={mobileOpen}
+            onClick={() => setMobileOpen((prev) => !prev)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#E5E5E5] dark:border-[#252525] text-[#111111] dark:text-[#F5F5F5] md:hidden cursor-pointer"
+          >
+            {mobileOpen ? (
+              <X className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <Menu className="h-4 w-4" aria-hidden="true" />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {mobileOpen && (
+        <div className="border-b border-[#E5E5E5] dark:border-[#252525] bg-[#FAFAFA] dark:bg-[#080808] px-4 py-4 md:hidden">
+          <nav aria-label="Mobile navigation" className="flex flex-col gap-1">
+            {[...NAV_LINKS, { href: '/settings', label: 'Settings' }, { href: '/privacy', label: 'Privacy' }, { href: '/about', label: 'About' }].map(
+              (item) => {
+                const active = pathname === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    to={item.href}
+                    onClick={() => setMobileOpen(false)}
+                    className={cn(
+                      'rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                      active
+                        ? 'bg-[#F1F1F1] dark:bg-[#151515] text-[#111111] dark:text-[#F5F5F5]'
+                        : 'text-[#666666] dark:text-[#929292]'
+                    )}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              }
+            )}
+          </nav>
+        </div>
+      )}
+    </header>
+  );
+}

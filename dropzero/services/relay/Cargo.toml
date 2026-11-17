@@ -1,0 +1,11 @@
+[package]
+name = "dropzero-relay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dz-relay = { path = "../../crates/dz-relay" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DROPZERO",
+  "version": "1.0.0",
+  "identifier": "org.dropzero.desktop",
+  "build": {
+    "frontendDist": "../../../dist",
+    "devUrl": "http://localhost:3000"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "DROPZERO",
+        "width": 1240,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 640
+      }
+    ]
+  }
+}

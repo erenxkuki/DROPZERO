@@ -1,0 +1,20 @@
+[package]
+name = "dz-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dz-config = { path = "../dz-config" }
+dz-discovery = { path = "../dz-discovery" }
+dz-integrity = { path = "../dz-integrity" }
+dz-network = { path = "../dz-network" }
+dz-protocol = { path = "../dz-protocol" }
+dz-quic = { path = "../dz-quic" }
+dz-recovery = { path = "../dz-recovery" }
+dz-relay = { path = "../dz-relay" }
+dz-security = { path = "../dz-security" }
+dz-storage = { path = "../dz-storage" }
+dz-telemetry = { path = "../dz-telemetry" }
+dz-transfer = { path = "../dz-transfer" }
+dz-webrtc = { path = "../dz-webrtc" }

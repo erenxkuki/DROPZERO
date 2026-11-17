@@ -1,0 +1,10 @@
+[package]
+name = "dz-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dz-security = { path = "../dz-security" }
+thiserror.workspace = true
+tokio.workspace = true

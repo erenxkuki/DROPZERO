@@ -1,0 +1,13 @@
+[package]
+name = "dz-quic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+quinn.workspace = true
+rustls.workspace = true
+rcgen.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+dz-protocol = { path = "../dz-protocol" }

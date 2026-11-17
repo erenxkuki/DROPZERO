@@ -1,0 +1,1500 @@
+# DROPZERO — COMPLETE MICRO-DETAILED PRODUCT, DESIGN & ENGINEERING MASTER PROMPT
+
+## 0. YOUR ROLE
+
+Act as a principal software architect, senior Rust engineer, senior networking engineer, frontend architect, product designer, security engineer, performance engineer, and quality assurance engineer.
+
+Your task is to design and implement DROPZERO: a beautiful, extremely fast, privacy-focused, cross-platform, peer-to-peer file-transfer platform.
+
+Do not build a generic file-upload website.
+
+Build a real product with an independently engineered transfer engine, a polished web experience, and a native desktop architecture.
+
+You are responsible for:
+- Architecture.
+- Technical implementation.
+- UI/UX.
+- Frontend.
+- Backend.
+- Native Rust engine.
+- Networking.
+- Security.
+- Performance optimization.
+- Error handling.
+- Testing.
+- Documentation.
+- Build and deployment configuration.
+
+Do not merely create mockups or a static prototype.
+
+Implement functional features wherever the environment permits.
+
+Do not pretend a feature works when it is only a visual placeholder.
+
+---
+
+# 1. PRODUCT IDENTITY
+
+Product name: DROPZERO
+
+Primary tagline:
+
+"Transfer without limits."
+
+Alternative supporting phrase:
+
+"Your devices. Your files. Your connection."
+
+Product category:
+Cross-platform peer-to-peer file transfer.
+
+Core philosophy:
+
+- Free forever.
+- No advertisements.
+- No paid speed upgrades.
+- No artificial transfer throttling.
+- No mandatory accounts.
+- No mandatory cloud storage.
+- Privacy-first.
+- Direct connection whenever possible.
+- Native performance wherever supported.
+- Reliable file integrity.
+- Beautiful and extremely simple user experience.
+
+DROPZERO must not artificially slow free users.
+
+Never implement fake speed multipliers, simulated performance improvements, deceptive progress indicators, or fake transfer statistics.
+
+A transfer must be genuinely functional.
+
+# 2. PRODUCT VISION
+
+DROPZERO should become a universal device-to-device file transfer ecosystem.
+
+It should eventually support:
+
+1. DROPZERO Web.
+2. DROPZERO Desktop.
+3. DROPZERO Android.
+4. DROPZERO Linux.
+5. DROPZERO macOS.
+6. DROPZERO Developer SDK.
+
+The initial development priority is Windows desktop, followed by other native platforms and web compatibility.
+
+The web client must remain useful without requiring installation.
+
+The native application must use a shared Rust transfer core.
+
+All supported clients should share the same protocol definitions and security principles.
+
+# 3. DESIGN DIRECTION
+
+This section is extremely important.
+
+The website must look like a premium, carefully designed technology product.
+
+Avoid generic AI-generated SaaS dashboard aesthetics.
+
+Avoid excessive gradients, neon colors, glassmorphism everywhere, oversized rounded cards, unnecessary decoration, and generic startup landing pages.
+
+## 3.1 Visual identity
+
+Primary visual direction:
+- Minimal.
+- Premium.
+- Futuristic but restrained.
+- Monochrome.
+- Technical.
+- Elegant.
+- Extremely clean.
+- High contrast.
+
+Color palette:
+
+Dark mode:
+- Main background: #080808
+- Secondary background: #101010
+- Elevated surface: #151515
+- Card surface: #111111
+- Primary text: #F5F5F5
+- Secondary text: #929292
+- Muted text: #626262
+- Border: #252525
+- Success: restrained green.
+- Warning: muted amber.
+- Error: restrained red.
+
+Light mode:
+- Main background: #FAFAFA
+- Secondary background: #F1F1F1
+- Elevated surface: #FFFFFF
+- Primary text: #111111
+- Secondary text: #666666
+- Border: #E5E5E5
+
+Use CSS variables for all design tokens.
+
+Support dark and light themes.
+
+Dark mode should be the default.
+
+## 3.2 Typography
+
+Use a carefully selected modern font pairing.
+
+Recommended:
+- Inter for interface typography.
+- Geist or equivalent for technical interface elements.
+- Monospace font for transfer rates, device IDs, hashes, and technical statistics.
+
+Typography rules:
+- Strong but restrained headings.
+- Excellent readability.
+- Consistent spacing.
+- Avoid excessively large body text.
+- Use tabular numbers for changing transfer statistics.
+- Never use random font sizes.
+
+## 3.3 Components
+
+Create a reusable design system.
+
+Components must include:
+
+- Button.
+- IconButton.
+- Input.
+- Switch.
+- Checkbox.
+- Dialog.
+- Modal.
+- Tooltip.
+- Dropdown.
+- ContextMenu.
+- Tabs.
+- Toast.
+- ProgressBar.
+- ProgressRing.
+- DeviceCard.
+- FileCard.
+- TransferCard.
+- TransferQueue.
+- QRCodeDialog.
+- EmptyState.
+- ErrorState.
+- LoadingState.
+- StatusIndicator.
+- NetworkIndicator.
+- SpeedIndicator.
+- ThemeSwitcher.
+- SettingsSection.
+
+Every component must have consistent:
+- Spacing.
+- Typography.
+- Border.
+- Hover states.
+- Focus states.
+- Disabled states.
+- Loading states.
+- Accessibility behavior.
+
+## 3.4 Motion design
+
+Use subtle, purposeful animations.
+
+Examples:
+- Buttons gently change background on hover.
+- Cards have restrained hover feedback.
+- Progress indicators update smoothly.
+- Device connection has a subtle connection animation.
+- QR dialog appears smoothly.
+- Toast notifications fade and slide.
+- Transfer completion has a restrained success animation.
+
+Avoid:
+- Constant bouncing.
+- Distracting backgrounds.
+- Excessive parallax.
+- Unnecessary loading animations.
+- Animations that block interactions.
+
+Honor prefers-reduced-motion.
+
+---
+
+# 4. WEBSITE STRUCTURE
+
+Create the following routes.
+
+/
+ /transfer
+ /devices
+ /history
+ /features
+ /about
+ /privacy
+ /security
+ /download
+ /settings
+
+Create a responsive navigation system.
+
+Desktop:
+- Left-aligned DROPZERO wordmark.
+- Center navigation.
+- Right-side theme control and download action.
+
+Mobile:
+- Compact navigation.
+- Accessible mobile menu.
+- Large transfer action.
+- No horizontal overflow.
+
+The website must feel like one cohesive product.
+
+# 5. HOMEPAGE
+
+The homepage is the primary entry point.
+
+## 5.1 Header
+
+Include:
+- DROPZERO logo.
+- Product name.
+- Transfer.
+- Features.
+- Security.
+- Download.
+- Theme toggle.
+
+Header requirements:
+- Sticky or intelligently positioned.
+- Minimal height.
+- Subtle bottom border.
+- Responsive.
+- No excessive shadows.
+
+## 5.2 Hero section
+
+Main heading:
+
+"Transfer without limits."
+
+Supporting text:
+
+"Send files directly between your devices. Fast, private, and completely free."
+
+Primary CTA:
+
+"Start transferring"
+
+Secondary CTA:
+
+"Explore DROPZERO"
+
+Below the CTA, show three concise properties:
+
+- No account required.
+- No advertisements.
+- No mandatory cloud uploads.
+
+Hero visual:
+
+Build a polished product visualization.
+
+Show:
+- A computer.
+- A smartphone.
+- A transfer connection.
+- A subtle transfer-progress indicator.
+- A minimal file representation.
+
+Use CSS, SVG, or custom components for the product visualization.
+
+Do not rely on random external image URLs for the core product interface.
+
+## 5.3 Main transfer widget
+
+This is the most important homepage component.
+
+Create a large, beautiful transfer workspace.
+
+Default state:
+
+A drag-and-drop area.
+
+Text:
+
+"Drop your files here"
+
+Supporting text:
+
+"or browse your device"
+
+Provide:
+- File selection.
+- Multiple file selection.
+- Folder selection where supported.
+- Drag-and-drop.
+- Selected-file listing.
+- File size display.
+- Remove-file controls.
+- Total selected size.
+- Clear-all action.
+
+The upload area must not actually upload to a cloud service.
+
+Selected files should remain locally controlled until a transfer session is explicitly started.
+
+The interface must explain that browser and native capabilities differ.
+
+## 5.4 Connection actions
+
+Show two primary actions:
+
+"Send files"
+
+"Receive files"
+
+Send flow:
+1. Select files.
+2. Create session.
+3. Display QR code.
+4. Show short pairing code.
+5. Wait for receiving device.
+6. Authenticate the peer.
+7. Obtain receiver acceptance.
+8. Begin transfer.
+9. Display live progress.
+10. Verify integrity.
+11. Show completion.
+
+Receive flow:
+1. Create receiving session.
+2. Display QR code.
+3. Display pairing code.
+4. Wait for sender.
+5. Verify sender identity.
+6. Show incoming files.
+7. Ask for explicit acceptance.
+8. Select destination.
+9. Receive data.
+10. Verify integrity.
+11. Show completion.
+
+Never silently accept incoming files.
+
+## 5.5 Trust section
+
+Display three principles:
+
+DIRECT WHEN POSSIBLE
+
+"Files travel directly between connected devices whenever network conditions permit."
+
+PRIVATE BY DESIGN
+
+"DROPZERO does not require an account or permanent cloud file storage."
+
+FREE FOREVER
+
+"No advertisements, subscriptions, or paid speed upgrades."
+
+Do not promise that every connection is direct. Explain relay fallback honestly.
+
+## 5.6 Features section
+
+Create elegant feature cards for:
+
+- Direct device transfers.
+- Large-file support.
+- QR pairing.
+- Multi-device sharing.
+- Transfer recovery.
+- Integrity verification.
+- Cross-platform compatibility.
+- Local network transfers.
+
+## 5.7 How it works
+
+Use a three-step visual explanation:
+
+1. Connect your devices.
+2. Select your files.
+3. Transfer directly.
+
+## 5.8 Footer
+
+Include:
+- DROPZERO branding.
+- Features.
+- Security.
+- Privacy.
+- Documentation.
+- GitHub.
+- Downloads.
+- License.
+- Version.
+
+Never invent a GitHub repository URL.
+
+Use configuration placeholders until the real repository exists.
+
+---
+
+# 6. TRANSFER INTERFACE
+
+Route: /transfer
+
+Create a dedicated workspace.
+
+The interface should prioritize usability over decoration.
+
+Layout:
+
+Left section:
+- Send.
+- Receive.
+- Nearby devices.
+- Transfer history.
+
+Main section:
+- Transfer workspace.
+- File selection.
+- Device pairing.
+- Connection status.
+
+Right section on larger screens:
+- Transfer details.
+- Device information.
+- Current transport.
+- Transfer statistics.
+
+On mobile, use a single-column layout.
+
+## 6.1 Transfer states
+
+Implement explicit states:
+
+IDLE
+SELECTING_FILES
+CREATING_SESSION
+WAITING_FOR_PEER
+PEER_DETECTED
+AUTHENTICATING
+AWAITING_ACCEPTANCE
+CONNECTING
+TRANSFERRING
+PAUSED
+VERIFYING
+COMPLETED
+FAILED
+CANCELLED
+RECOVERING
+
+Every state must have:
+- Clear visual representation.
+- Valid transitions.
+- Appropriate actions.
+- Error handling.
+
+Never permit impossible state transitions.
+
+## 6.2 Transfer progress
+
+Display:
+- Percentage.
+- Transferred bytes.
+- Total bytes.
+- Current speed.
+- Average speed.
+- Estimated remaining time.
+- Current connection type.
+- Verification status.
+
+Use real measured values.
+
+Do not simulate speed.
+
+If speed is unavailable, display an appropriate unavailable state.
+
+Use smoothed speed readings for visual stability while preserving accurate raw measurements.
+
+## 6.3 Transfer queue
+
+Support:
+- Multiple queued files.
+- Multiple transfers when resources permit.
+- Individual cancellation.
+- Overall progress.
+- Per-file progress.
+- Retry on recoverable failure.
+- Resume where supported.
+
+Define concurrency limits.
+
+Do not create unlimited transfer tasks.
+
+---
+
+# 7. DEVICE MANAGEMENT
+
+Route: /devices
+
+Create a device management page.
+
+Device information:
+- Device name.
+- Device type.
+- Platform.
+- Connection status.
+- Last successful session.
+- Session identity.
+
+Possible device types:
+- Windows PC.
+- Linux PC.
+- macOS.
+- Android.
+- Browser.
+
+Features:
+- Pair a device.
+- Remove a remembered device.
+- Rename a local device.
+- Show current session.
+- Show supported capabilities.
+
+Do not expose private IP addresses publicly or collect unnecessary hardware identifiers.
+
+Remembered devices must be optional.
+
+Allow users to use temporary sessions without persistent device registration.
+
+---
+
+# 8. TRANSFER HISTORY
+
+Route: /history
+
+Provide local transfer history.
+
+Display:
+- Filename.
+- Transfer direction.
+- File size.
+- Date.
+- Status.
+- Device.
+- Duration.
+
+History must be locally stored by default.
+
+Provide:
+- Search.
+- Sorting.
+- Filters.
+- Clear history.
+- Individual history deletion.
+
+Do not store file contents.
+
+Do not send file names or transfer history to analytics services.
+
+---
+
+# 9. SETTINGS
+
+Route: /settings
+
+Sections:
+
+GENERAL
+- Theme.
+- Language.
+- Device name.
+- Startup behavior.
+- Notifications.
+
+TRANSFER
+- Default destination.
+- Maximum concurrent transfers.
+- Preferred transport.
+- Resume behavior.
+- Confirmation settings.
+
+NETWORK
+- Connection diagnostics.
+- Current connection type.
+- Relay status.
+- Network troubleshooting.
+
+PRIVACY
+- Local history.
+- Remembered devices.
+- Data cleanup.
+- Privacy explanation.
+
+ADVANCED
+- Debug logging.
+- Performance metrics.
+- Protocol information.
+- Diagnostic export.
+
+Do not expose dangerous network or security configuration as casual toggles.
+
+---
+
+# 10. TECHNICAL ARCHITECTURE
+
+Use a modular Rust-first architecture.
+
+Preferred stack:
+
+Frontend:
+- React.
+- TypeScript.
+- Vite.
+- Tailwind CSS.
+- Accessible component primitives.
+
+Desktop:
+- Tauri.
+- Rust.
+
+Core:
+- Rust.
+- Tokio.
+- Quinn for QUIC.
+- WebRTC implementation for browser-compatible transport.
+- BLAKE3 for hashing.
+- SQLite for local metadata.
+- Protocol Buffers for versioned message schemas.
+
+Backend:
+- Rust or Node.js signaling service.
+- WebSocket signaling.
+- TURN-compatible relay infrastructure.
+
+Verify current library compatibility and maintenance before selecting exact versions.
+
+Use stable releases and pin dependencies.
+
+Do not blindly select deprecated libraries.
+
+# 11. RUST WORKSPACE
+
+Create a Cargo workspace.
+
+Suggested structure:
+
+dropzero/
+  Cargo.toml
+  rust-toolchain.toml
+
+  apps/
+    desktop/
+    cli/
+
+  crates/
+    dz-core/
+    dz-transfer/
+    dz-network/
+    dz-quic/
+    dz-webrtc/
+    dz-relay/
+    dz-discovery/
+    dz-security/
+    dz-integrity/
+    dz-storage/
+    dz-recovery/
+    dz-protocol/
+    dz-config/
+    dz-telemetry/
+
+  services/
+    signaling/
+    relay/
+
+  web/
+    frontend/
+
+  tests/
+    integration/
+    performance/
+    reliability/
+    security/
+
+  docs/
+
+Each crate must have:
+- Clear responsibility.
+- Public API boundaries.
+- Unit tests.
+- Documentation.
+- Error definitions.
+- No unnecessary circular dependencies.
+
+## 11.1 dz-core
+
+Responsible for:
+- Application initialization.
+- Transfer orchestration.
+- Client lifecycle.
+- Session lifecycle.
+- Shared configuration.
+- Platform abstraction.
+
+## 11.2 dz-transfer
+
+Responsible for:
+- Transfer scheduling.
+- File manifests.
+- Chunk management.
+- Transfer state.
+- Backpressure.
+- Cancellation.
+- Progress reporting.
+
+## 11.3 dz-network
+
+Responsible for:
+- Transport abstraction.
+- Network selection.
+- Connection management.
+- Capability negotiation.
+- Connection health.
+
+## 11.4 dz-quic
+
+Responsible for native QUIC transport.
+
+Use Quinn.
+
+Support:
+- Encrypted sessions.
+- Multiple independent streams.
+- Flow control.
+- Connection recovery.
+- Congestion control.
+- Proper connection shutdown.
+
+## 11.5 dz-webrtc
+
+Responsible for browser interoperability.
+
+Implement the browser-compatible data channel integration.
+
+Do not assume browser WebRTC is automatically interchangeable with native QUIC.
+
+Define explicit transport interfaces and separate protocol adapters.
+
+## 11.6 dz-discovery
+
+Responsible for local device discovery.
+
+Evaluate:
+- mDNS/DNS-SD.
+- Explicit pairing.
+- QR-based discovery.
+- Manual connection.
+
+Do not expose discovery services beyond the intended network scope.
+
+## 11.7 dz-integrity
+
+Responsible for:
+- BLAKE3 hashing.
+- Chunk verification.
+- File verification.
+- Manifest validation.
+- Integrity errors.
+
+## 11.8 dz-recovery
+
+Responsible for:
+- Resume metadata.
+- Completed chunk tracking.
+- Interrupted transfer recovery.
+- Session restoration where safe.
+- Recovery validation.
+
+## 11.9 dz-security
+
+Responsible for:
+- Authentication.
+- Key management.
+- Session authorization.
+- Encryption integration.
+- Pairing token validation.
+- Replay protection.
+- Secure cleanup.
+
+## 11.10 dz-storage
+
+Responsible for:
+- SQLite metadata.
+- Local settings.
+- Device records.
+- Transfer history.
+- Recovery metadata.
+
+Do not store file contents in SQLite.
+
+---
+
+# 12. TRANSFER PIPELINE
+
+Design a streaming pipeline.
+
+Conceptual sequence:
+
+File Source
+    ↓
+File Reader
+    ↓
+Chunk Manager
+    ↓
+Bounded Queue
+    ↓
+Transport Scheduler
+    ↓
+Encrypted Transport
+    ↓
+Receiver Queue
+    ↓
+Integrity Verification
+    ↓
+File Writer
+    ↓
+Atomic Finalization
+
+The architecture must be asynchronous and cancellation-aware.
+
+## 12.1 Chunking
+
+Do not use one fixed chunk size for every environment.
+
+Start with configurable chunk sizes.
+
+Initial experimental values:
+- 256 KiB.
+- 1 MiB.
+- 4 MiB.
+
+Benchmark them.
+
+Use receiver feedback, network characteristics and memory pressure to select an appropriate configuration.
+
+Do not claim that a particular chunk size is universally optimal.
+
+## 12.2 Backpressure
+
+Use bounded channels.
+
+The receiver must be able to signal when it cannot accept more data.
+
+The sender must respond appropriately.
+
+Avoid:
+- Unbounded queues.
+- Unlimited buffering.
+- Excessive task creation.
+- Repeated unnecessary memory allocation.
+- Blocking the async runtime.
+
+## 12.3 File I/O
+
+Use efficient asynchronous or carefully managed file I/O.
+
+Avoid loading entire files into RAM.
+
+Use bounded memory.
+
+Use temporary destination files.
+
+Verify file integrity before finalizing.
+
+Never overwrite an existing file without an explicit and understandable user decision.
+
+## 12.4 Parallelism
+
+Implement configurable concurrency.
+
+Benchmark:
+- Sequential file transfer.
+- Multiple file transfers.
+- Multiple streams.
+- Parallel reading.
+- Parallel hashing.
+
+Do not parallelize blindly.
+
+The engine should avoid oversubscribing CPU, storage and network resources.
+
+---
+
+# 13. TRANSPORT SELECTION
+
+Create a common transport interface.
+
+Conceptual API:
+
+Transport
+- connect()
+- authenticate()
+- send()
+- receive()
+- close()
+- health()
+- capabilities()
+
+Available transport adapters:
+
+1. Native QUIC.
+2. WebRTC.
+3. Relay transport.
+4. Additional fallback transports where justified.
+
+Preferred selection:
+
+Native direct QUIC when supported and reachable.
+
+WebRTC for browser interoperability.
+
+Relay fallback when direct connectivity fails.
+
+TCP fallback only when justified and implemented safely.
+
+The selection system must:
+- Check capabilities.
+- Authenticate peers.
+- Detect connection failures.
+- Avoid infinite retries.
+- Report the actual transport.
+- Avoid silently degrading security.
+
+Do not assume QUIC is always faster than TCP.
+
+Benchmark under controlled conditions.
+
+---
+
+# 14. NETWORK CONNECTION SYSTEM
+
+Implement session establishment as a separate subsystem.
+
+Sequence:
+
+1. Generate session identifier.
+2. Generate short-lived pairing material.
+3. Publish signaling information.
+4. Exchange capabilities.
+5. Authenticate peer.
+6. Attempt direct connectivity.
+7. Select a supported transport.
+8. Request receiver acceptance.
+9. Establish transfer session.
+10. Start data movement.
+
+The signaling server must not receive file contents or private session keys.
+
+Use short-lived credentials.
+
+Expire unused pairing sessions.
+
+Prevent pairing replay.
+
+Do not treat possession of a publicly exposed session identifier as sufficient authentication.
+
+QR codes must not contain permanent secrets.
+
+---
+
+# 15. SECURITY REQUIREMENTS
+
+Security is a release requirement, not a future enhancement.
+
+Implement:
+
+- Authenticated peer pairing.
+- Modern authenticated encryption.
+- Ephemeral session keys.
+- Secure key exchange.
+- Session expiration.
+- Replay protection.
+- Input validation.
+- Protocol version validation.
+- Path traversal protection.
+- Filename sanitization.
+- Explicit file acceptance.
+- Safe file writing.
+- Rate-limited signaling.
+- Safe temporary-file handling.
+
+Use established cryptographic protocols and maintained libraries.
+
+Do not design custom cryptographic algorithms.
+
+Do not invent encryption implementations.
+
+Ensure authentication happens before accepting file data.
+
+Provide a clear threat model.
+
+Document:
+- What data leaves the device.
+- What the signaling server sees.
+- What relay servers can observe.
+- What remains local.
+- What happens when a direct connection fails.
+
+Do not falsely claim that relayed transfers avoid infrastructure.
+
+Do not automatically execute received files.
+
+Do not automatically open downloaded files.
+
+---
+
+# 16. PERFORMANCE ENGINEERING
+
+Performance is DROPZERO's central identity.
+
+Goals:
+- High sustained throughput.
+- Low CPU overhead.
+- Predictable memory usage.
+- Efficient disk I/O.
+- Fast connection establishment.
+- Reliable recovery.
+- Minimal protocol overhead.
+
+Implement:
+
+1. Adaptive chunk sizing.
+2. Bounded buffering.
+3. Backpressure.
+4. Efficient file reads.
+5. Efficient file writes.
+6. Transport-aware concurrency.
+7. Reuse of appropriate buffers.
+8. Reduced unnecessary allocations.
+9. Efficient integrity verification.
+10. Cancellation-safe asynchronous tasks.
+
+Investigate zero-copy opportunities where platform APIs support them.
+
+Do not advertise zero-copy when data is actually being copied.
+
+Do not introduce unsafe Rust simply to claim better performance.
+
+Any unsafe optimization requires:
+- A documented safety argument.
+- Tests.
+- Benchmark evidence.
+- Code review.
+
+# 17. PERFORMANCE MONITORING
+
+Provide real-time statistics.
+
+Show:
+- Current throughput.
+- Average throughput.
+- Peak throughput.
+- Bytes transferred.
+- Total bytes.
+- Estimated remaining time.
+- CPU usage where supported.
+- Memory usage where supported.
+- Disk throughput where supported.
+- Transport type.
+- Connection quality.
+
+Do not transmit these statistics to third parties by default.
+
+Provide optional local diagnostic logs.
+
+Never fake measurements.
+
+# 18. BENCHMARKING
+
+Build a reproducible benchmark suite.
+
+Test:
+- 100 MB files.
+- 1 GB files.
+- 10 GB files.
+- Many small files.
+- Large folder transfers.
+- Slow disks.
+- Fast NVMe disks.
+- Wi-Fi.
+- Ethernet.
+- Interrupted connections.
+- Low-memory devices.
+- Different operating systems.
+
+Compare against existing tools under identical conditions.
+
+Record:
+- Hardware.
+- Operating system.
+- Network.
+- File size.
+- Transport.
+- Throughput.
+- CPU.
+- RAM.
+- Duration.
+- Verification result.
+
+Generate machine-readable benchmark results.
+
+Never fabricate benchmark data.
+
+The benchmark suite must be usable by contributors.
+
+---
+
+# 19. BROWSER COMPATIBILITY
+
+The web application must work without requiring the desktop application.
+
+Use:
+- WebRTC.
+- WebSocket signaling.
+- File API.
+- Streams API where supported.
+- IndexedDB for local metadata and recovery where appropriate.
+
+Browser limitations must be handled honestly.
+
+Do not pretend browsers have unrestricted filesystem access.
+
+Explain unsupported features gracefully.
+
+The web frontend must never silently upload selected files to the signaling server.
+
+Use peer-to-peer transfer when supported.
+
+Explain relay usage when applicable.
+
+---
+
+# 20. DESKTOP APPLICATION
+
+Use Tauri with a Rust backend.
+
+The desktop application should provide:
+
+- File selection.
+- Folder selection.
+- Drag-and-drop.
+- QR pairing.
+- Local discovery.
+- Transfer queue.
+- Pause and resume where supported.
+- Notifications.
+- Download destination settings.
+- Transfer history.
+- Network diagnostics.
+- Automatic update support with secure verification.
+
+Desktop UI must communicate with the Rust core through a stable, validated command/event API.
+
+Never expose unrestricted arbitrary filesystem operations to the frontend.
+
+Use capability-based permissions.
+
+---
+
+# 21. ERROR HANDLING
+
+Every subsystem needs structured errors.
+
+Examples:
+
+- NETWORK_UNAVAILABLE.
+- PEER_NOT_FOUND.
+- PAIRING_EXPIRED.
+- AUTHENTICATION_FAILED.
+- TRANSFER_REJECTED.
+- FILE_READ_FAILED.
+- FILE_WRITE_FAILED.
+- INTEGRITY_MISMATCH.
+- STORAGE_FULL.
+- TRANSPORT_FAILED.
+- SESSION_EXPIRED.
+- RESUME_UNAVAILABLE.
+- UNSUPPORTED_PLATFORM.
+
+User-facing errors should be understandable.
+
+Technical logs should contain diagnostic context without leaking secrets.
+
+Retry only when appropriate.
+
+Avoid infinite retry loops.
+
+Always make cancellation available.
+
+---
+
+# 22. TESTING
+
+Required tests:
+
+Unit:
+- Chunk manager.
+- Manifest generation.
+- Hash verification.
+- State transitions.
+- Filename sanitization.
+- Session expiration.
+- Recovery metadata.
+
+Integration:
+- Two native clients.
+- Browser to native.
+- Native to browser.
+- Direct connection.
+- Relay fallback.
+- Large files.
+- Interrupted transfer.
+- Multiple files.
+- Rejected transfer.
+
+Security:
+- Invalid pairing.
+- Expired credentials.
+- Replay attempts.
+- Malformed messages.
+- Unauthorized sessions.
+- Path traversal.
+- Unexpected filenames.
+- Resource exhaustion.
+
+Reliability:
+- Connection loss.
+- Disk full.
+- Receiver shutdown.
+- Sender shutdown.
+- Corrupted chunk.
+- Partial file.
+- Resume failure.
+
+Use automated CI.
+
+All critical tests must pass before release.
+
+---
+
+# 23. DOCUMENTATION
+
+Create:
+
+README.md
+ARCHITECTURE.md
+PROTOCOL.md
+SECURITY.md
+PRIVACY.md
+PERFORMANCE.md
+CONTRIBUTING.md
+BUILDING.md
+TESTING.md
+LICENSE
+
+README must explain:
+- What DROPZERO is.
+- Why it exists.
+- Supported platforms.
+- Installation.
+- How transfers work.
+- Security principles.
+- Performance philosophy.
+- Development instructions.
+
+Do not invent supported features.
+
+Mark experimental functionality as experimental.
+
+---
+
+# 24. DEVELOPMENT WORKFLOW
+
+Work in small, verifiable phases.
+
+Before implementation:
+
+1. Inspect the repository.
+2. Identify existing code.
+3. Identify existing conventions.
+4. Inspect available dependencies.
+5. Check platform requirements.
+6. Prepare an implementation plan.
+
+Do not overwrite existing work blindly.
+
+Then implement in this order:
+
+PHASE 1:
+- Repository structure.
+- Rust workspace.
+- Shared protocol.
+- File manifest.
+- Hashing.
+- Local file I/O.
+
+PHASE 2:
+- Native QUIC connection.
+- Peer authentication.
+- Basic file transfer.
+- Integrity verification.
+
+PHASE 3:
+- Transfer pipeline.
+- Backpressure.
+- Adaptive chunking.
+- Performance benchmarks.
+
+PHASE 4:
+- Signaling.
+- QR pairing.
+- Discovery.
+- Relay fallback.
+
+PHASE 5:
+- Recovery.
+- Transfer queue.
+- Multiple files.
+- Error handling.
+
+PHASE 6:
+- Tauri desktop.
+- Beautiful interface.
+- Event integration.
+- Settings.
+
+PHASE 7:
+- Browser client.
+- WebRTC.
+- Cross-platform compatibility.
+
+PHASE 8:
+- Security review.
+- Stress testing.
+- Documentation.
+- Release preparation.
+
+At the end of every phase:
+- Compile.
+- Run tests.
+- Check formatting.
+- Run linting.
+- Review dependencies.
+- Document completed features.
+- Document remaining limitations.
+
+Do not claim completion when tests have not passed.
+
+Do not create fake buttons.
+
+Do not leave critical functionality as TODO comments.
+
+If a feature cannot be implemented in the current environment, document the blocker and provide the exact next implementation step.
+
+---
+
+# 25. DESIGN QUALITY CHECKLIST
+
+Before declaring the frontend complete, verify:
+
+- The homepage looks professionally designed.
+- Dark mode is polished.
+- Light mode is polished.
+- Mobile layout works.
+- Navigation works.
+- Every button has a real action.
+- Every form validates input.
+- Drag-and-drop works.
+- File selection works.
+- Empty states exist.
+- Error states exist.
+- Loading states exist.
+- Transfer progress uses actual data.
+- Dialogs are accessible.
+- Keyboard navigation works.
+- Focus states are visible.
+- No horizontal overflow.
+- No console errors.
+- No broken routes.
+- No fake transfer functionality.
+
+---
+
+# 26. NON-NEGOTIABLE RULES
+
+1. DROPZERO is free forever.
+2. No advertisements.
+3. No paid speed upgrades.
+4. Never artificially throttle free users.
+5. No mandatory accounts.
+6. No mandatory cloud storage.
+7. Never upload files to the signaling server.
+8. Prefer direct peer-to-peer connections.
+9. Use relays only when necessary.
+10. Never sacrifice integrity for speed.
+11. Never sacrifice security for speed.
+12. Never fabricate performance numbers.
+13. Never claim a feature is functional when it is not.
+14. Never load entire large files into memory unnecessarily.
+15. Keep the Rust core modular.
+16. Keep transport implementations replaceable.
+17. Maintain cross-platform compatibility.
+18. Prioritize real engineering over flashy demonstrations.
+19. Use clean, maintainable, documented code.
+20. Make the interface beautiful without compromising usability.
+
+# 27. FINAL DELIVERABLE
+
+Deliver a real, buildable DROPZERO project.
+
+Expected outputs:
+
+- Complete repository structure.
+- Beautiful responsive website.
+- Working file selection.
+- Working native transfer core.
+- Native QUIC transfer between supported clients.
+- Secure peer pairing.
+- Transfer progress.
+- File integrity verification.
+- Transfer recovery.
+- Signaling service.
+- Browser compatibility foundation.
+- Tauri desktop application.
+- Automated tests.
+- Reproducible benchmarks.
+- Complete documentation.
+- Build instructions.
+
+The first release does not need every planned platform.
+
+It must have one genuinely excellent end-to-end transfer implementation before expanding.
+
+FINAL PRODUCT IDENTITY:
+
+DROPZERO
+
+"Transfer without limits."
+
+Free forever. No advertisements. No artificial limits.
+
+Built for speed. Engineered for trust.
+
+Start by inspecting the repository and producing a phased implementation plan. Then begin implementation immediately. Do not stop after producing the plan.

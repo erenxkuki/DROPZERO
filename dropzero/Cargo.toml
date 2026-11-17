@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dz-config",
+    "crates/dz-protocol",
+    "crates/dz-integrity",
+    "crates/dz-security",
+    "crates/dz-storage",
+    "crates/dz-recovery",
+    "crates/dz-network",
+    "crates/dz-quic",
+    "crates/dz-webrtc",
+    "crates/dz-relay",
+    "crates/dz-discovery",
+    "crates/dz-telemetry",
+    "crates/dz-transfer",
+    "crates/dz-core",
+    "apps/cli",
+    "apps/desktop/src-tauri",
+    "services/signaling",
+    "services/relay",
+    "tests/integration",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT OR Apache-2.0"
+authors = ["DROPZERO Contributors"]
+
+[workspace.dependencies]
+tokio = { version = "1.41", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+anyhow = "1.0"
+blake3 = "1.5"
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+hkdf = "0.12"
+sha2 = "0.10"
+chacha20poly1305 = "0.10"
+rand = "0.8"
+bytes = "1.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.5", features = ["derive"] }
+quinn = "0.11"
+rustls = "0.23"
+rcgen = "0.13"
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+hex = "0.4"

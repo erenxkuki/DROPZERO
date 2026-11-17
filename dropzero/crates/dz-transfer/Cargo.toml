@@ -1,0 +1,13 @@
+[package]
+name = "dz-transfer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dz-integrity = { path = "../dz-integrity" }
+dz-protocol = { path = "../dz-protocol" }
+dz-storage = { path = "../dz-storage" }
+dz-telemetry = { path = "../dz-telemetry" }
+thiserror.workspace = true
+tokio.workspace = true

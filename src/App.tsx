@@ -1,5 +1,6 @@
 import React from 'react';
-import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-dom';
+import { AnimatePresence, motion, MotionConfig, useScroll, useSpring } from 'motion/react';
 import { ThemeProvider } from '@/src/components/ui/theme-switcher';
 import { ToastProvider } from '@/src/components/ui/toast';
 import { TransferProvider } from '@/src/lib/dropzero/transfer-context';
@@ -35,34 +36,71 @@ function NotFoundPage() {
   );
 }
 
+function ScrollProgressBar() {
+  const { scrollYProgress } = useScroll();
+  const scaleX = useSpring(scrollYProgress, {
+    stiffness: 260,
+    damping: 32,
+    restDelta: 0.001,
+  });
+
+  return (
+    <motion.div
+      aria-hidden="true"
+      style={{ scaleX, transformOrigin: '0% 50%' }}
+      className="fixed top-16 left-0 right-0 z-30 h-[2px] bg-[#111111] dark:bg-[#F5F5F5] pointer-events-none"
+    />
+  );
+}
+
+function AnimatedRoutes() {
+  const location = useLocation();
+
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={location.pathname}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -4 }}
+        transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+        className="flex-1"
+      >
+        <Routes location={location}>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/transfer" element={<TransferPage />} />
+          <Route path="/devices" element={<DevicesPage />} />
+          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/features" element={<FeaturesPage />} />
+          <Route path="/security" element={<SecurityPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/download" element={<DownloadPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 export default function App() {
   return (
-    <ThemeProvider>
-      <ToastProvider>
-        <TransferProvider>
-          <BrowserRouter>
-            <div className="flex min-h-dvh flex-col bg-[#FAFAFA] dark:bg-[#080808] text-[#111111] dark:text-[#F5F5F5]">
-              <Header />
-              <div className="flex-1">
-                <Routes>
-                  <Route path="/" element={<HomePage />} />
-                  <Route path="/transfer" element={<TransferPage />} />
-                  <Route path="/devices" element={<DevicesPage />} />
-                  <Route path="/history" element={<HistoryPage />} />
-                  <Route path="/features" element={<FeaturesPage />} />
-                  <Route path="/security" element={<SecurityPage />} />
-                  <Route path="/privacy" element={<PrivacyPage />} />
-                  <Route path="/about" element={<AboutPage />} />
-                  <Route path="/download" element={<DownloadPage />} />
-                  <Route path="/settings" element={<SettingsPage />} />
-                  <Route path="*" element={<NotFoundPage />} />
-                </Routes>
+    <MotionConfig reducedMotion="user">
+      <ThemeProvider>
+        <ToastProvider>
+          <TransferProvider>
+            <BrowserRouter>
+              <div className="flex min-h-dvh flex-col bg-[#FAFAFA] dark:bg-[#080808] text-[#111111] dark:text-[#F5F5F5]">
+                <Header />
+                <ScrollProgressBar />
+                <AnimatedRoutes />
+                <Footer />
               </div>
-              <Footer />
-            </div>
-          </BrowserRouter>
-        </TransferProvider>
-      </ToastProvider>
-    </ThemeProvider>
+            </BrowserRouter>
+          </TransferProvider>
+        </ToastProvider>
+      </ThemeProvider>
+    </MotionConfig>
   );
 }

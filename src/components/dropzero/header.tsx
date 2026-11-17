@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 import { ThemeSwitcher } from '@/src/components/ui/theme-switcher';
 import { Button } from '@/src/components/ui/button';
@@ -20,11 +21,11 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-40 h-16 border-b border-[#E5E5E5] dark:border-[#252525] bg-[#FAFAFA]/90 dark:bg-[#080808]/90 backdrop-blur-md">
-      <div className="mx-auto flex h-full max-w-[1200px] items-center justify-between gap-4 px-4 sm:px-6">
+      <div className="mx-auto flex h-full max-w-[1200px] items-center justify-between gap-6 px-4 sm:px-6">
         <Link
           to="/"
           onClick={() => setMobileOpen(false)}
-          className="inline-flex items-center gap-2.5 text-[#111111] dark:text-[#F5F5F5] whitespace-nowrap shrink-0"
+          className="group inline-flex items-center gap-2.5 text-[#111111] dark:text-[#F5F5F5] whitespace-nowrap shrink-0"
         >
           <svg
             width="22"
@@ -49,6 +50,7 @@ export function Header() {
               strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
+              className="transition-transform duration-200 ease-out group-hover:translate-x-[1.5px]"
             />
           </svg>
           <span className="font-mono text-sm font-semibold tracking-[0.14em] uppercase">
@@ -58,7 +60,7 @@ export function Header() {
 
         <nav
           aria-label="Primary navigation"
-          className="hidden md:flex items-center gap-6"
+          className="hidden md:flex items-center gap-6 h-full"
         >
           {NAV_LINKS.map((item) => {
             const active = pathname === item.href;
@@ -67,13 +69,20 @@ export function Header() {
                 key={item.href}
                 to={item.href}
                 className={cn(
-                  'text-xs font-medium transition-colors duration-150 whitespace-nowrap shrink-0',
+                  'relative inline-flex h-full items-center text-xs font-medium transition-colors duration-150 whitespace-nowrap shrink-0',
                   active
                     ? 'text-[#111111] dark:text-[#F5F5F5]'
                     : 'text-[#666666] dark:text-[#929292] hover:text-[#111111] dark:hover:text-[#F5F5F5]'
                 )}
               >
                 {item.label}
+                {active && (
+                  <motion.span
+                    layoutId="dz-nav-underline"
+                    transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                    className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#111111] dark:bg-[#F5F5F5]"
+                  />
+                )}
               </Link>
             );
           })}
@@ -107,11 +116,22 @@ export function Header() {
         </div>
       </div>
 
-      {mobileOpen && (
-        <div className="border-b border-[#E5E5E5] dark:border-[#252525] bg-[#FAFAFA] dark:bg-[#080808] px-4 py-4 md:hidden">
-          <nav aria-label="Mobile navigation" className="flex flex-col gap-1">
-            {[...NAV_LINKS, { href: '/settings', label: 'Settings' }, { href: '/privacy', label: 'Privacy' }, { href: '/about', label: 'About' }].map(
-              (item) => {
+      <AnimatePresence>
+        {mobileOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="border-b border-[#E5E5E5] dark:border-[#252525] bg-[#FAFAFA] dark:bg-[#080808] px-4 py-4 md:hidden"
+          >
+            <nav aria-label="Mobile navigation" className="flex flex-col gap-1">
+              {[
+                ...NAV_LINKS,
+                { href: '/settings', label: 'Settings' },
+                { href: '/privacy', label: 'Privacy' },
+                { href: '/about', label: 'About' },
+              ].map((item) => {
                 const active = pathname === item.href;
                 return (
                   <Link
@@ -128,11 +148,11 @@ export function Header() {
                     {item.label}
                   </Link>
                 );
-              }
-            )}
-          </nav>
-        </div>
-      )}
+              })}
+            </nav>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </header>
   );
 }

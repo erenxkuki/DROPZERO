@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Upload,
 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 import { useTransfer } from '@/src/lib/dropzero/transfer-context';
 import { formatBytes, formatSas } from '@/src/lib/dropzero/format';
@@ -371,25 +372,37 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
             ]}
           />
 
-          {modeTab === 'send' ? (
-            <div className="space-y-4">
-              <div
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragging(true);
-                }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={handleDrop}
-                className={cn(
-                  'rounded-lg border-2 border-dashed p-6 text-center transition-colors duration-150',
-                  dragging
-                    ? 'border-[#111111] dark:border-[#F5F5F5] bg-[#F1F1F1] dark:bg-[#151515]'
-                    : 'border-[#D4D4D4] dark:border-[#2A2A2A] bg-[#FAFAFA] dark:bg-[#0D0D0D]'
-                )}
+          <AnimatePresence mode="wait">
+            {modeTab === 'send' ? (
+              <motion.div
+                key="tab-send"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+                className="space-y-4"
               >
-                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-[#E5E5E5] dark:border-[#252525] bg-[#FFFFFF] dark:bg-[#151515] text-[#111111] dark:text-[#F5F5F5]">
-                  <Upload className="h-4 w-4" aria-hidden="true" />
-                </div>
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragging(true);
+                  }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={handleDrop}
+                  className={cn(
+                    'rounded-lg border-2 border-dashed p-6 text-center transition-all duration-150',
+                    dragging
+                      ? 'border-[#111111] dark:border-[#F5F5F5] bg-[#F1F1F1] dark:bg-[#151515] scale-[1.01]'
+                      : 'border-[#D4D4D4] dark:border-[#2A2A2A] bg-[#FAFAFA] dark:bg-[#0D0D0D]'
+                  )}
+                >
+                  <motion.div
+                    animate={dragging ? { y: -3, scale: 1.06 } : { y: 0, scale: 1 }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+                    className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-[#E5E5E5] dark:border-[#252525] bg-[#FFFFFF] dark:bg-[#151515] text-[#111111] dark:text-[#F5F5F5]"
+                  >
+                    <Upload className="h-4 w-4" aria-hidden="true" />
+                  </motion.div>
                 <p className="mt-3 text-sm font-medium text-[#111111] dark:text-[#F5F5F5]">
                   Drop files or folders here
                 </p>
@@ -457,16 +470,25 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                   </div>
 
                   <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
-                    {selectedFiles.map((item) => (
-                      <FileCard
-                        key={item.id}
-                        name={item.name}
-                        relativePath={item.relativePath}
-                        size={item.size}
-                        status="staged"
-                        onRemove={() => removeSelectedFile(item.id)}
-                      />
-                    ))}
+                    <AnimatePresence initial={false}>
+                      {selectedFiles.map((item) => (
+                        <motion.div
+                          key={item.id}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.97 }}
+                          transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+                        >
+                          <FileCard
+                            name={item.name}
+                            relativePath={item.relativePath}
+                            size={item.size}
+                            status="staged"
+                            onRemove={() => removeSelectedFile(item.id)}
+                          />
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
                   </div>
 
                   <Button variant="primary" className="w-full" onClick={startSendSession}>
@@ -474,9 +496,16 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                   </Button>
                 </div>
               )}
-            </div>
+            </motion.div>
           ) : (
-            <div className="space-y-5">
+            <motion.div
+              key="tab-receive"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+              className="space-y-5"
+            >
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -559,8 +588,9 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                   </div>
                 )}
               </div>
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
         </div>
       )}
     </div>

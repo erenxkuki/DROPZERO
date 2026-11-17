@@ -162,6 +162,9 @@ export function TransferPage() {
                       }
                     >
                       {entry.event}
+                      {entry.detail ? (
+                        <span className="text-[#8A8A8A] dark:text-[#626262]"> · {entry.detail}</span>
+                      ) : null}
                     </span>
                   </li>
                 ))}

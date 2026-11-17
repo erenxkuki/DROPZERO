@@ -119,6 +119,7 @@ interface TransferContextValue {
   startSendSession: () => Promise<void>;
   startReceiveSession: () => Promise<void>;
   joinSessionByCode: (code: string) => Promise<void>;
+  sendManifestWhenReady: () => Promise<void>;
   acceptIncomingTransfer: () => Promise<void>;
   rejectIncomingTransfer: () => void;
   pauseTransfer: () => void;
@@ -272,9 +273,13 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
   const [logs, setLogs] = useState<DiagnosticLogEntry[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const wsConnectPromiseRef = useRef<Promise<WebSocket> | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const controlChannelRef = useRef<RTCDataChannel | null>(null);
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
+  const pendingAnswerRef = useRef<RTCSessionDescriptionInit | null>(null);
   const ephemeralRef = useRef<EphemeralIdentity | null>(null);
   const aesKeyRef = useRef<CryptoKey | null>(null);
   const transportModeRef = useRef<TransportKind>('unavailable');
@@ -284,6 +289,7 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
   const pauseWaitersRef = useRef<Array<() => void>>([]);
   const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const iceFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendManifestRef = useRef<(() => Promise<void>) | null>(null);
   const metricsTrackerRef = useRef<ActiveMetricsTracker>({
     startedAt: 0,
     lastSampleAt: 0,
@@ -303,6 +309,8 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
         totalChunks: number;
         receivedBytes: number;
         expectedBlake3?: string;
+        completeRequested?: boolean;
+        finalized?: boolean;
         mimeType: string;
         filename: string;
       }
@@ -387,7 +395,7 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
     [addLog]
   );
 
-  const teardownConnection = useCallback(() => {
+  const teardownConnection = useCallback((closeSignaling = false) => {
     if (statsIntervalRef.current) {
       clearInterval(statsIntervalRef.current);
       statsIntervalRef.current = null;
@@ -396,6 +404,10 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(iceFallbackTimerRef.current);
       iceFallbackTimerRef.current = null;
     }
+    pendingIceCandidatesRef.current = [];
+    pendingOfferRef.current = null;
+    pendingAnswerRef.current = null;
+
     if (dataChannelRef.current) {
       try {
         dataChannelRef.current.close();
@@ -419,16 +431,18 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
         if (wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'session:leave' }));
         }
-        wsRef.current.close();
+        if (closeSignaling) {
+          wsRef.current.close();
+          wsRef.current = null;
+          setSignalingConnected(false);
+        }
       } catch {}
-      wsRef.current = null;
     }
-    setSignalingConnected(false);
   }, []);
 
   useEffect(() => {
     return () => {
-      teardownConnection();
+      teardownConnection(true);
     };
   }, [teardownConnection]);
 
@@ -491,8 +505,17 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
       if (pcRef.current && resolvedTransport !== 'ws-encrypted-relay') {
         try {
           const stats = await pcRef.current.getStats();
+          let selectedPairId: string | null = null;
           stats.forEach((report) => {
-            if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+            if (report.type === 'transport' && typeof report.selectedCandidatePairId === 'string') {
+              selectedPairId = report.selectedCandidatePairId;
+            }
+          });
+          stats.forEach((report) => {
+            const isActivePair =
+              report.type === 'candidate-pair' &&
+              (selectedPairId ? report.id === selectedPairId : report.nominated || report.state === 'succeeded');
+            if (isActivePair) {
               if (typeof report.currentRoundTripTime === 'number') {
                 rttMs = Math.round(report.currentRoundTripTime * 1000);
               }
@@ -567,24 +590,27 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
 
   const addDroppedItems = useCallback(
     async (dataTransfer: DataTransfer) => {
-      const items = Array.from(dataTransfer.items || []);
-      const extracted: File[] = [];
+      const fallbackFiles = Array.from(dataTransfer.files || []);
+      const rawItems = Array.from(dataTransfer.items || []);
+      const snapshots = rawItems.map((item) => ({
+        entry: item.webkitGetAsEntry?.() ?? null,
+        file: item.kind === 'file' ? item.getAsFile() : null,
+      }));
 
-      for (const item of items) {
-        const entry = item.webkitGetAsEntry?.();
-        if (entry) {
-          const files = await readEntryFiles(entry);
+      const extracted: File[] = [];
+      for (const snap of snapshots) {
+        if (snap.entry) {
+          const files = await readEntryFiles(snap.entry);
           extracted.push(...files);
-        } else if (item.kind === 'file') {
-          const f = item.getAsFile();
-          if (f) extracted.push(f);
+        } else if (snap.file) {
+          extracted.push(snap.file);
         }
       }
 
-      if (extracted.length === 0 && dataTransfer.files.length > 0) {
-        addFiles(dataTransfer.files);
-      } else if (extracted.length > 0) {
+      if (extracted.length > 0) {
         addFiles(extracted);
+      } else if (fallbackFiles.length > 0) {
+        addFiles(fallbackFiles);
       }
     },
     [addFiles]
@@ -737,6 +763,15 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
           const fullBlake3 = fileHasher.digestHex();
           lastFileHash = fullBlake3;
 
+          if (transportModeRef.current !== 'ws-encrypted-relay') {
+            const dc = dataChannelRef.current;
+            let drainAttempts = 0;
+            while (dc && dc.readyState === 'open' && dc.bufferedAmount > 0 && drainAttempts < 200) {
+              await new Promise((r) => setTimeout(r, 15));
+              drainAttempts += 1;
+            }
+          }
+
           setFileProgress((prev) =>
             prev.map((fp) =>
               fp.index === fileIdx
@@ -784,6 +819,108 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
     [addLog, failWith, sendControlMessage, startMetricsPolling, transitionState]
   );
 
+  const finalizeReceivedFile = useCallback(
+    async (fileIndex: number) => {
+      const buf = recvBuffersRef.current.get(fileIndex);
+      if (!buf || buf.finalized || !buf.completeRequested || buf.expectedBlake3 === undefined) {
+        return;
+      }
+      if (buf.receivedCount < buf.totalChunks) {
+        return;
+      }
+
+      buf.finalized = true;
+      transitionState('VERIFYING');
+      setFileProgress((prev) =>
+        prev.map((fp) =>
+          fp.index === fileIndex
+            ? { ...fp, status: 'verifying', blake3Expected: buf.expectedBlake3 }
+            : fp
+        )
+      );
+
+      const hasher = new StreamingFileHasher();
+      await hasher.init();
+      const orderedParts: BlobPart[] = [];
+
+      for (let i = 0; i < buf.totalChunks; i++) {
+        const part = buf.chunks.get(i);
+        if (!part) {
+          failWith('INTEGRITY_MISMATCH', `Missing chunk ${i} for "${buf.filename}".`);
+          return;
+        }
+        hasher.update(part);
+        orderedParts.push(part as unknown as BlobPart);
+      }
+
+      const computedHex = hasher.digestHex();
+      if (computedHex !== buf.expectedBlake3) {
+        await sendControlMessage({ type: 'INTEGRITY_ERROR', fileIndex });
+        failWith(
+          'INTEGRITY_MISMATCH',
+          `Final BLAKE3 verification failed for "${buf.filename}".`
+        );
+        return;
+      }
+
+      const blob = new Blob(orderedParts, { type: buf.mimeType || 'application/octet-stream' });
+      const downloadUrl = URL.createObjectURL(blob);
+
+      buf.chunks.clear();
+      if (sessionIdRef.current) {
+        deleteRecoveryCheckpoint(`${sessionIdRef.current}:${fileIndex}`);
+      }
+
+      setFileProgress((prev) =>
+        prev.map((fp) =>
+          fp.index === fileIndex
+            ? {
+                ...fp,
+                status: 'verified' as const,
+                blake3Expected: buf.expectedBlake3,
+                blake3Computed: computedHex,
+                downloadUrl,
+              }
+            : fp
+        )
+      );
+
+      const allFinalized = Array.from(recvBuffersRef.current.values()).every((b) => b.finalized);
+      if (allFinalized) {
+        await sendControlMessage({ type: 'ALL_VERIFIED', blake3Root: computedHex });
+        transitionState('COMPLETED');
+        if (statsIntervalRef.current) {
+          clearInterval(statsIntervalRef.current);
+          statsIntervalRef.current = null;
+        }
+        const m = incomingManifestRef.current;
+        const manifestFiles = m?.files || [];
+        await addTransferHistory({
+          id: m?.sessionId || `rx-${Date.now()}`,
+          filename:
+            manifestFiles.length <= 1
+              ? manifestFiles[0]?.name || buf.filename
+              : `${manifestFiles[0].name} (+${manifestFiles.length - 1})`,
+          fileCount: manifestFiles.length || 1,
+          direction: 'received',
+          totalBytes: m?.totalBytes || buf.receivedBytes,
+          timestamp: Date.now(),
+          status: 'completed',
+          deviceName: remotePeerRef.current?.deviceName || 'Sender',
+          deviceType: remotePeerRef.current?.deviceType || 'Browser',
+          durationMs: Math.max(
+            100,
+            Math.round(performance.now() - metricsTrackerRef.current.startedAt)
+          ),
+          transport: transportModeRef.current,
+          blake3Root: computedHex,
+        });
+        setHistory(await getTransferHistory());
+      }
+    },
+    [failWith, sendControlMessage, transitionState]
+  );
+
   const handleIncomingBinaryChunk = useCallback(
     async (rawBytes: Uint8Array) => {
       try {
@@ -805,12 +942,14 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const copy = new Uint8Array(frame.payload.length);
-        copy.set(frame.payload);
-        fileState.chunks.set(frame.chunkIndex, copy);
-        fileState.receivedCount += 1;
-        fileState.receivedBytes += copy.length;
-        metricsTrackerRef.current.bytesTransferred += copy.length;
+        if (!fileState.chunks.has(frame.chunkIndex)) {
+          const copy = new Uint8Array(frame.payload.length);
+          copy.set(frame.payload);
+          fileState.chunks.set(frame.chunkIndex, copy);
+          fileState.receivedCount += 1;
+          fileState.receivedBytes += copy.length;
+          metricsTrackerRef.current.bytesTransferred += copy.length;
+        }
 
         setFileProgress((prev) =>
           prev.map((fp) =>
@@ -830,11 +969,15 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
             transferId: `${sessionIdRef.current}:${frame.fileIndex}`,
             filename: fileState.filename,
             totalBytes: metricsTrackerRef.current.totalBytes,
-            chunkSize: copy.length,
+            chunkSize: frame.payload.length,
             totalChunks: fileState.totalChunks,
             completedChunks: Array.from(fileState.chunks.keys()),
             updatedAt: Date.now(),
           });
+        }
+
+        if (fileState.completeRequested && fileState.receivedCount >= fileState.totalChunks) {
+          await finalizeReceivedFile(frame.fileIndex);
         }
       } catch (err) {
         failWith(
@@ -843,7 +986,7 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
         );
       }
     },
-    [failWith, sendControlMessage]
+    [failWith, finalizeReceivedFile, sendControlMessage]
   );
 
   const handleControlMessage = useCallback(
@@ -852,6 +995,10 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
 
       switch (msgType) {
         case 'TRANSFER_MANIFEST': {
+          if (iceFallbackTimerRef.current) {
+            clearTimeout(iceFallbackTimerRef.current);
+            iceFallbackTimerRef.current = null;
+          }
           const manifest = msg.manifest as TransferManifest;
           incomingManifestRef.current = manifest;
           setIncomingManifest(manifest);
@@ -886,6 +1033,7 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
             ...prev,
             totalBytes: manifest.totalBytes,
             activeChunkSize: manifest.files[0]?.chunkSize || 256 * 1024,
+            transport: transportModeRef.current,
           }));
           transitionState('AWAITING_ACCEPTANCE');
           break;
@@ -923,6 +1071,11 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
             files: manifestFiles,
             createdAt: Date.now(),
           };
+          setMetrics((prev) => ({
+            ...prev,
+            totalBytes,
+            activeChunkSize: manifestFiles[0]?.chunkSize || prev.activeChunkSize,
+          }));
           await runSenderPipeline(manifest);
           break;
         }
@@ -937,89 +1090,11 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
           const expectedBlake3 = String(msg.blake3 || '');
           const buf = recvBuffersRef.current.get(fileIndex);
           if (!buf) return;
-
-          transitionState('VERIFYING');
-          setFileProgress((prev) =>
-            prev.map((fp) =>
-              fp.index === fileIndex
-                ? { ...fp, status: 'verifying', blake3Expected: expectedBlake3 }
-                : fp
-            )
-          );
-
-          const hasher = new StreamingFileHasher();
-          await hasher.init();
-          const orderedParts: BlobPart[] = [];
-
-          for (let i = 0; i < buf.totalChunks; i++) {
-            const part = buf.chunks.get(i);
-            if (!part) {
-              failWith('INTEGRITY_MISMATCH', `Missing chunk ${i} for "${buf.filename}".`);
-              return;
-            }
-            hasher.update(part);
-            orderedParts.push(part as unknown as BlobPart);
+          buf.expectedBlake3 = expectedBlake3;
+          buf.completeRequested = true;
+          if (buf.receivedCount >= buf.totalChunks) {
+            await finalizeReceivedFile(fileIndex);
           }
-
-          const computedHex = hasher.digestHex();
-          if (computedHex !== expectedBlake3) {
-            await sendControlMessage({ type: 'INTEGRITY_ERROR', fileIndex });
-            failWith(
-              'INTEGRITY_MISMATCH',
-              `Final BLAKE3 verification failed for "${buf.filename}".`
-            );
-            return;
-          }
-
-          const blob = new Blob(orderedParts, { type: buf.mimeType || 'application/octet-stream' });
-          const downloadUrl = URL.createObjectURL(blob);
-
-          buf.chunks.clear();
-          if (sessionIdRef.current) {
-            deleteRecoveryCheckpoint(`${sessionIdRef.current}:${fileIndex}`);
-          }
-
-          setFileProgress((prev) => {
-            const updated = prev.map((fp) =>
-              fp.index === fileIndex
-                ? {
-                    ...fp,
-                    status: 'verified' as const,
-                    blake3Expected: expectedBlake3,
-                    blake3Computed: computedHex,
-                    downloadUrl,
-                  }
-                : fp
-            );
-            const allVerified = updated.every((u) => u.status === 'verified');
-            if (allVerified) {
-              sendControlMessage({ type: 'ALL_VERIFIED', blake3Root: computedHex });
-              transitionState('COMPLETED');
-              if (statsIntervalRef.current) {
-                clearInterval(statsIntervalRef.current);
-                statsIntervalRef.current = null;
-              }
-              const m = incomingManifestRef.current;
-              addTransferHistory({
-                id: m?.sessionId || `rx-${Date.now()}`,
-                filename:
-                  updated.length === 1
-                    ? updated[0].name
-                    : `${updated[0].name} (+${updated.length - 1})`,
-                fileCount: updated.length,
-                direction: 'received',
-                totalBytes: m?.totalBytes || 0,
-                timestamp: Date.now(),
-                status: 'completed',
-                deviceName: remotePeerRef.current?.deviceName || 'Sender',
-                deviceType: remotePeerRef.current?.deviceType || 'Browser',
-                durationMs: Math.max(100, Math.round(performance.now() - metricsTrackerRef.current.startedAt)),
-                transport: transportModeRef.current,
-                blake3Root: computedHex,
-              }).then(() => getTransferHistory().then(setHistory));
-            }
-            return updated;
-          });
           break;
         }
 
@@ -1086,15 +1161,38 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
           }
           break;
         }
+
+        case 'TRANSPORT_SWITCH': {
+          if (iceFallbackTimerRef.current) {
+            clearTimeout(iceFallbackTimerRef.current);
+            iceFallbackTimerRef.current = null;
+          }
+          transportModeRef.current = 'ws-encrypted-relay';
+          setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
+          addLog('info', 'Peer switched transport to E2E encrypted relay');
+          if (
+            roleRef.current === 'sender' &&
+            (stateRef.current === 'CONNECTING' ||
+              stateRef.current === 'AUTHENTICATING' ||
+              stateRef.current === 'PEER_DETECTED')
+          ) {
+            await sendManifestRef.current?.();
+          }
+          break;
+        }
       }
     },
-    [failWith, runSenderPipeline, sendControlMessage, transitionState]
+    [addLog, failWith, finalizeReceivedFile, runSenderPipeline, transitionState]
   );
 
   const sendManifestWhenReady = useCallback(async () => {
     if (roleRef.current !== 'sender') return;
     const files = selectedFilesRef.current;
-    if (files.length === 0) return;
+    if (files.length === 0) {
+      transitionState('SELECTING_FILES');
+      addLog('info', 'Paired with receiver — select files to begin sending');
+      return;
+    }
     const isRelay = transportModeRef.current === 'ws-encrypted-relay';
     const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
 
@@ -1125,6 +1223,12 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
       createdAt: Date.now(),
     };
 
+    setMetrics((prev) => ({
+      ...prev,
+      totalBytes,
+      activeChunkSize: manifestFiles[0]?.chunkSize || prev.activeChunkSize,
+    }));
+
     setFileProgress(
       manifestFiles.map((f) => ({
         index: f.index,
@@ -1141,11 +1245,53 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
 
     transitionState('AWAITING_ACCEPTANCE');
     await sendControlMessage({ type: 'TRANSFER_MANIFEST', manifest });
-  }, [sendControlMessage, transitionState]);
+  }, [addLog, sendControlMessage, transitionState]);
+
+  useEffect(() => {
+    sendManifestRef.current = sendManifestWhenReady;
+  }, [sendManifestWhenReady]);
+
+  const flushPendingIce = useCallback(
+    async (pc: RTCPeerConnection) => {
+      if (!pc.remoteDescription) return;
+      const queued = pendingIceCandidatesRef.current.splice(0);
+      for (const cand of queued) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch {}
+      }
+    },
+    []
+  );
 
   const setupWebRTC = useCallback(
     async (isInitiator: boolean) => {
       transitionState('CONNECTING');
+
+      if (settingsRef.current.preferredTransport === 'relay-fallback') {
+        transportModeRef.current = 'ws-encrypted-relay';
+        setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
+        addLog('info', 'Using E2E encrypted WebSocket relay transport');
+        if (roleRef.current === 'sender') {
+          await sendManifestWhenReady();
+        }
+        return;
+      }
+
+      if (typeof RTCPeerConnection === 'undefined') {
+        if (settingsRef.current.preferredTransport !== 'webrtc-only') {
+          transportModeRef.current = 'ws-encrypted-relay';
+          setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
+          addLog('warn', 'WebRTC unavailable; using E2E encrypted relay fallback');
+          if (roleRef.current === 'sender') {
+            await sendManifestWhenReady();
+          }
+          return;
+        }
+        failWith('UNSUPPORTED_PLATFORM', 'WebRTC is unavailable in this browser.');
+        return;
+      }
+
       const pc = new RTCPeerConnection({ iceServers: getIceServers() });
       pcRef.current = pc;
 
@@ -1179,9 +1325,12 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
         dc.binaryType = 'arraybuffer';
         dataChannelRef.current = dc;
         dc.onopen = () => addLog('info', 'WebRTC binary data channel open');
-        dc.onmessage = (ev) => {
+        dc.onmessage = async (ev) => {
           if (ev.data instanceof ArrayBuffer) {
-            handleIncomingBinaryChunk(new Uint8Array(ev.data));
+            await handleIncomingBinaryChunk(new Uint8Array(ev.data));
+          } else if (ev.data instanceof Blob) {
+            const buf = await ev.data.arrayBuffer();
+            await handleIncomingBinaryChunk(new Uint8Array(buf));
           }
         };
       };
@@ -1218,8 +1367,17 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
           }
           try {
             const stats = await pc.getStats();
+            let selectedPairId: string | null = null;
             stats.forEach((report) => {
-              if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+              if (report.type === 'transport' && typeof report.selectedCandidatePairId === 'string') {
+                selectedPairId = report.selectedCandidatePairId;
+              }
+            });
+            stats.forEach((report) => {
+              const isActivePair =
+                report.type === 'candidate-pair' &&
+                (selectedPairId ? report.id === selectedPairId : report.nominated || report.state === 'succeeded');
+              if (isActivePair) {
                 const remoteCand = stats.get(report.remoteCandidateId);
                 if (remoteCand?.candidateType === 'host') transportModeRef.current = 'webrtc-direct-lan';
                 else if (remoteCand?.candidateType === 'relay') transportModeRef.current = 'webrtc-turn-relay';
@@ -1234,10 +1392,14 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
           } catch {}
         } else if (s === 'failed') {
           if (settingsRef.current.preferredTransport !== 'webrtc-only') {
+            if (iceFallbackTimerRef.current) {
+              clearTimeout(iceFallbackTimerRef.current);
+              iceFallbackTimerRef.current = null;
+            }
             transportModeRef.current = 'ws-encrypted-relay';
             setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
             addLog('warn', 'Direct WebRTC failed; switched to E2E encrypted relay fallback');
-            if (roleRef.current === 'sender') {
+            if (roleRef.current === 'sender' && stateRef.current === 'CONNECTING') {
               await sendManifestWhenReady();
             }
           } else {
@@ -1251,7 +1413,11 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
 
       iceFallbackTimerRef.current = setTimeout(async () => {
         const dcOpen = controlChannelRef.current?.readyState === 'open';
-        if (!dcOpen && settingsRef.current.preferredTransport !== 'webrtc-only') {
+        const stillNegotiating =
+          stateRef.current === 'CONNECTING' ||
+          stateRef.current === 'AUTHENTICATING' ||
+          stateRef.current === 'PEER_DETECTED';
+        if (!dcOpen && stillNegotiating && settingsRef.current.preferredTransport !== 'webrtc-only') {
           transportModeRef.current = 'ws-encrypted-relay';
           setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
           addLog('warn', 'Direct WebRTC timed out; switched to E2E encrypted relay fallback');
@@ -1259,25 +1425,77 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
             await sendManifestWhenReady();
           }
         }
-      }, 10_000);
+      }, 4000);
 
-      if (isInitiator) {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        wsRef.current?.send(
-          JSON.stringify({
-            type: 'signal:relay',
-            signalType: 'offer',
-            payload: pc.localDescription,
-          })
-        );
+      try {
+        if (isInitiator) {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(
+              JSON.stringify({
+                type: 'signal:relay',
+                signalType: 'offer',
+                payload: pc.localDescription,
+              })
+            );
+          }
+          if (pendingAnswerRef.current) {
+            const ans = pendingAnswerRef.current;
+            pendingAnswerRef.current = null;
+            await pc.setRemoteDescription(new RTCSessionDescription(ans));
+            await flushPendingIce(pc);
+          }
+        } else if (pendingOfferRef.current) {
+          const offer = pendingOfferRef.current;
+          pendingOfferRef.current = null;
+          await pc.setRemoteDescription(new RTCSessionDescription(offer));
+          await flushPendingIce(pc);
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(
+              JSON.stringify({
+                type: 'signal:relay',
+                signalType: 'answer',
+                payload: pc.localDescription,
+              })
+            );
+          }
+        }
+      } catch (err) {
+        addLog('warn', 'WebRTC negotiation error', err instanceof Error ? err.message : undefined);
+        if (settingsRef.current.preferredTransport !== 'webrtc-only') {
+          transportModeRef.current = 'ws-encrypted-relay';
+          setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
+          if (roleRef.current === 'sender') {
+            await sendManifestWhenReady();
+          }
+        } else {
+          failWith('TRANSPORT_FAILED', 'WebRTC SDP negotiation failed.');
+        }
       }
     },
-    [addLog, failWith, handleControlMessage, handleIncomingBinaryChunk, sendManifestWhenReady, transitionState]
+    [
+      addLog,
+      failWith,
+      flushPendingIce,
+      handleControlMessage,
+      handleIncomingBinaryChunk,
+      sendManifestWhenReady,
+      transitionState,
+    ]
   );
 
   const connectSignaling = useCallback((): Promise<WebSocket> => {
-    return new Promise((resolve, reject) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      return Promise.resolve(wsRef.current);
+    }
+    if (wsConnectPromiseRef.current && wsRef.current?.readyState === WebSocket.CONNECTING) {
+      return wsConnectPromiseRef.current;
+    }
+
+    const promise = new Promise<WebSocket>((resolve, reject) => {
       const url = getSignalingWsUrl();
       if (!url) {
         reject(new DropZeroError('NETWORK_UNAVAILABLE', 'Signaling URL unavailable'));
@@ -1290,24 +1508,34 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
       const timeout = setTimeout(() => {
         if (ws.readyState !== WebSocket.OPEN) {
           ws.close();
+          wsConnectPromiseRef.current = null;
           reject(new DropZeroError('NETWORK_UNAVAILABLE', 'Signaling server timed out'));
         }
       }, 8000);
 
       ws.onopen = () => {
         clearTimeout(timeout);
+        wsConnectPromiseRef.current = null;
         setSignalingConnected(true);
         addLog('info', 'Connected to DROPZERO signaling');
+        ws.send(JSON.stringify({ type: 'discovery:list' }));
         resolve(ws);
       };
 
       ws.onerror = () => {
         clearTimeout(timeout);
+        wsConnectPromiseRef.current = null;
         setSignalingConnected(false);
         reject(new DropZeroError('NETWORK_UNAVAILABLE', 'Failed to reach signaling server'));
       };
 
-      ws.onclose = () => setSignalingConnected(false);
+      ws.onclose = () => {
+        wsConnectPromiseRef.current = null;
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+        }
+        setSignalingConnected(false);
+      };
 
       ws.onmessage = async (event) => {
         if (typeof event.data !== 'string') return;
@@ -1320,6 +1548,9 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
 
         const type = typeof msg.type === 'string' ? msg.type : '';
         switch (type) {
+          case 'pong':
+            break;
+
           case 'discovery:sessions':
             setDiscoverableSessions((msg.sessions as DiscoverableSession[]) || []);
             break;
@@ -1417,36 +1648,55 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
 
           case 'signal:relay': {
             const pc = pcRef.current;
-            if (!pc) return;
             const signalType = msg.signalType;
-            if (signalType === 'offer') {
-              await pc.setRemoteDescription(
-                new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit)
-              );
-              const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
-              ws.send(
-                JSON.stringify({
-                  type: 'signal:relay',
-                  signalType: 'answer',
-                  payload: pc.localDescription,
-                })
-              );
-            } else if (signalType === 'answer') {
-              await pc.setRemoteDescription(
-                new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit)
-              );
-            } else if (signalType === 'ice-candidate') {
-              try {
-                await pc.addIceCandidate(new RTCIceCandidate(msg.payload as RTCIceCandidateInit));
-              } catch {}
+            if (!pc) {
+              if (signalType === 'offer') {
+                pendingOfferRef.current = msg.payload as RTCSessionDescriptionInit;
+              } else if (signalType === 'answer') {
+                pendingAnswerRef.current = msg.payload as RTCSessionDescriptionInit;
+              } else if (signalType === 'ice-candidate' && msg.payload) {
+                pendingIceCandidatesRef.current.push(msg.payload as RTCIceCandidateInit);
+              }
+              return;
             }
+            try {
+              if (signalType === 'offer') {
+                await pc.setRemoteDescription(
+                  new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit)
+                );
+                await flushPendingIce(pc);
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                ws.send(
+                  JSON.stringify({
+                    type: 'signal:relay',
+                    signalType: 'answer',
+                    payload: pc.localDescription,
+                  })
+                );
+              } else if (signalType === 'answer') {
+                await pc.setRemoteDescription(
+                  new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit)
+                );
+                await flushPendingIce(pc);
+              } else if (signalType === 'ice-candidate' && msg.payload) {
+                if (!pc.remoteDescription) {
+                  pendingIceCandidatesRef.current.push(msg.payload as RTCIceCandidateInit);
+                } else {
+                  await pc.addIceCandidate(new RTCIceCandidate(msg.payload as RTCIceCandidateInit));
+                }
+              }
+            } catch {}
             break;
           }
 
           case 'relay:packet': {
             const key = aesKeyRef.current;
             if (!key) return;
+            if (transportModeRef.current === 'unavailable') {
+              transportModeRef.current = 'ws-encrypted-relay';
+              setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
+            }
             try {
               const plain = await decryptRelayFrame(key, String(msg.iv), String(msg.ciphertext));
               if (plain[0] === 0x01) {
@@ -1489,14 +1739,44 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
         }
       };
     });
-  }, [addLog, failWith, handleControlMessage, handleIncomingBinaryChunk, setupWebRTC, transitionState]);
+
+    wsConnectPromiseRef.current = promise;
+    return promise;
+  }, [
+    addLog,
+    failWith,
+    flushPendingIce,
+    handleControlMessage,
+    handleIncomingBinaryChunk,
+    setupWebRTC,
+    transitionState,
+  ]);
+
+  useEffect(() => {
+    connectSignaling().catch(() => {});
+    const pingTimer = setInterval(() => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'ping' }));
+      } else if (!wsRef.current) {
+        connectSignaling().catch(() => {});
+      }
+    }, 25_000);
+    return () => clearInterval(pingTimer);
+  }, [connectSignaling]);
 
   const startSendSession = useCallback(async () => {
     if (selectedFilesRef.current.length === 0) {
       failWith('FILE_READ_FAILED', 'Select at least one file before starting a send session.');
       return;
     }
-    teardownConnection();
+    if (!crypto?.subtle) {
+      failWith(
+        'UNSUPPORTED_PLATFORM',
+        'WebCrypto ECDH requires HTTPS or localhost secure context.'
+      );
+      return;
+    }
+    teardownConnection(false);
     setError(null);
     setSasCode(null);
     setSasConfirmed(false);
@@ -1538,7 +1818,14 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
   }, [connectSignaling, failWith, teardownConnection, transitionState]);
 
   const startReceiveSession = useCallback(async () => {
-    teardownConnection();
+    if (!crypto?.subtle) {
+      failWith(
+        'UNSUPPORTED_PLATFORM',
+        'WebCrypto ECDH requires HTTPS or localhost secure context.'
+      );
+      return;
+    }
+    teardownConnection(false);
     setError(null);
     setSasCode(null);
     setSasConfirmed(false);
@@ -1587,13 +1874,22 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
         failWith('PEER_NOT_FOUND', 'Enter a valid 6-character pairing code.');
         return;
       }
+      if (!crypto?.subtle) {
+        failWith(
+          'UNSUPPORTED_PLATFORM',
+          'WebCrypto ECDH requires HTTPS or localhost secure context.'
+        );
+        return;
+      }
 
-      teardownConnection();
+      teardownConnection(false);
       setError(null);
       setSasCode(null);
       setSasConfirmed(false);
       setRemotePeer(null);
       transportModeRef.current = 'unavailable';
+      stateRef.current = 'IDLE';
+      transitionState('CREATING_SESSION');
 
       try {
         const identity = await generateEphemeralIdentity();
@@ -1619,7 +1915,7 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
         );
       }
     },
-    [connectSignaling, failWith, teardownConnection]
+    [connectSignaling, failWith, teardownConnection, transitionState]
   );
 
   const acceptIncomingTransfer = useCallback(async () => {
@@ -1634,7 +1930,7 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
   const rejectIncomingTransfer = useCallback(() => {
     sendControlMessage({ type: 'REJECT_TRANSFER' });
     transitionState('CANCELLED');
-    teardownConnection();
+    teardownConnection(false);
   }, [sendControlMessage, teardownConnection, transitionState]);
 
   const pauseTransfer = useCallback(() => {
@@ -1657,7 +1953,7 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
     waiters.forEach((fn) => fn());
     sendControlMessage({ type: 'CANCEL_TRANSFER' });
     transitionState('CANCELLED');
-    teardownConnection();
+    teardownConnection(false);
   }, [sendControlMessage, teardownConnection, transitionState]);
 
   const switchToRelayFallback = useCallback(async () => {
@@ -1667,14 +1963,21 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
     }
     transportModeRef.current = 'ws-encrypted-relay';
     setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
-    addLog('info', 'Manually switched to E2E encrypted relay transport');
-    if (roleRef.current === 'sender' && stateRef.current === 'CONNECTING') {
+    addLog('info', 'Switched to E2E encrypted relay transport');
+    if (
+      roleRef.current === 'sender' &&
+      (stateRef.current === 'CONNECTING' ||
+        stateRef.current === 'AUTHENTICATING' ||
+        stateRef.current === 'PEER_DETECTED')
+    ) {
       await sendManifestWhenReady();
+    } else if (roleRef.current === 'receiver') {
+      await sendControlMessage({ type: 'TRANSPORT_SWITCH', transport: 'ws-encrypted-relay' });
     }
-  }, [addLog, sendManifestWhenReady]);
+  }, [addLog, sendControlMessage, sendManifestWhenReady]);
 
   const resetWorkspace = useCallback(() => {
-    teardownConnection();
+    teardownConnection(false);
     cancelledRef.current = false;
     pausedRef.current = false;
     setError(null);
@@ -1702,20 +2005,14 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
       ws.send(JSON.stringify({ type: 'discovery:list' }));
       return;
     }
-    const url = getSignalingWsUrl();
-    if (!url) return;
-    const tempWs = new WebSocket(url);
-    tempWs.onopen = () => tempWs.send(JSON.stringify({ type: 'discovery:list' }));
-    tempWs.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(String(ev.data)) as Record<string, unknown>;
-        if (msg.type === 'discovery:sessions') {
-          setDiscoverableSessions((msg.sessions as DiscoverableSession[]) || []);
+    connectSignaling()
+      .then((socket) => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'discovery:list' }));
         }
-      } catch {}
-      tempWs.close();
-    };
-  }, []);
+      })
+      .catch(() => {});
+  }, [connectSignaling]);
 
   const deleteHistoryItem = useCallback(async (id: string) => {
     await deleteHistoryEntry(id);
@@ -1793,6 +2090,7 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
         startSendSession,
         startReceiveSession,
         joinSessionByCode,
+        sendManifestWhenReady,
         acceptIncomingTransfer,
         rejectIncomingTransfer,
         pauseTransfer,

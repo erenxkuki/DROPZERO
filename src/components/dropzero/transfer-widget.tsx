@@ -58,6 +58,7 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
     startSendSession,
     startReceiveSession,
     joinSessionByCode,
+    sendManifestWhenReady,
     acceptIncomingTransfer,
     rejectIncomingTransfer,
     pauseTransfer,
@@ -76,10 +77,24 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
   const [dragging, setDragging] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (initialPairCode) {
+      setModeTab('receive');
+      setJoinCode(initialPairCode.toUpperCase());
+    }
+  }, [initialPairCode]);
+
+  useEffect(() => {
+    if (modeTab === 'receive') {
+      refreshDiscovery();
+    }
+  }, [modeTab, refreshDiscovery]);
 
   useEffect(() => {
     if (!pairingExpiresAt) return;
@@ -103,6 +118,17 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
       setCopiedCode(true);
       pushToast({ title: 'Pairing code copied', tone: 'success' });
       setTimeout(() => setCopiedCode(false), 1800);
+    } catch {}
+  };
+
+  const handleCopyShareLink = async () => {
+    if (!pairingCode || typeof window === 'undefined') return;
+    const shareUrl = `${window.location.origin}/transfer?pair=${pairingCode}`;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopiedLink(true);
+      pushToast({ title: 'Pairing link copied', description: 'Open in another browser tab or device.', tone: 'success' });
+      setTimeout(() => setCopiedLink(false), 1800);
     } catch {}
   };
 
@@ -313,6 +339,19 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                   </>
                 )}
               </Button>
+              <Button variant="outline" size="sm" onClick={handleCopyShareLink}>
+                {copiedLink ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-[#16A34A] dark:text-[#22C55E]" aria-hidden="true" />
+                    Link Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                    Copy Link
+                  </>
+                )}
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setQrOpen(true)}>
                 <QrCode className="h-3.5 w-3.5" aria-hidden="true" />
                 Show QR Code
@@ -383,6 +422,15 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                 className="space-y-4"
               >
                 <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => fileInputRef.current?.click()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      fileInputRef.current?.click();
+                    }
+                  }}
                   onDragOver={(e) => {
                     e.preventDefault();
                     setDragging(true);
@@ -390,10 +438,10 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                   onDragLeave={() => setDragging(false)}
                   onDrop={handleDrop}
                   className={cn(
-                    'rounded-lg border-2 border-dashed p-6 text-center transition-all duration-150',
+                    'rounded-lg border-2 border-dashed p-6 text-center transition-all duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#111111] dark:focus:ring-[#F5F5F5]',
                     dragging
                       ? 'border-[#111111] dark:border-[#F5F5F5] bg-[#F1F1F1] dark:bg-[#151515] scale-[1.01]'
-                      : 'border-[#D4D4D4] dark:border-[#2A2A2A] bg-[#FAFAFA] dark:bg-[#0D0D0D]'
+                      : 'border-[#D4D4D4] dark:border-[#2A2A2A] bg-[#FAFAFA] dark:bg-[#0D0D0D] hover:border-[#A3A3A3] dark:hover:border-[#404040]'
                   )}
                 >
                   <motion.div
@@ -404,7 +452,9 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                     <Upload className="h-4 w-4" aria-hidden="true" />
                   </motion.div>
                 <p className="mt-3 text-sm font-medium text-[#111111] dark:text-[#F5F5F5]">
-                  Drop files or folders here
+                  {remotePeer && role === 'sender'
+                    ? `Paired with ${remotePeer.deviceName} — click or drop files to send`
+                    : 'Click to select or drop files and folders here'}
                 </p>
                 <p className="mt-1 text-xs text-[#666666] dark:text-[#929292]">
                   Files remain local in memory until your peer verifies the SAS code and accepts.
@@ -414,10 +464,11 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  className="hidden"
+                  className="sr-only"
                   onChange={(e) => {
-                    if (e.target.files) addFiles(e.target.files);
+                    const files = e.target.files ? Array.from(e.target.files) : [];
                     e.target.value = '';
+                    if (files.length > 0) addFiles(files);
                   }}
                 />
                 <input
@@ -425,10 +476,11 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                   type="file"
                   multiple
                   {...({ webkitdirectory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
-                  className="hidden"
+                  className="sr-only"
                   onChange={(e) => {
-                    if (e.target.files) addFiles(e.target.files);
+                    const files = e.target.files ? Array.from(e.target.files) : [];
                     e.target.value = '';
+                    if (files.length > 0) addFiles(files);
                   }}
                 />
 
@@ -437,7 +489,10 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fileInputRef.current?.click();
+                    }}
                   >
                     Select Files
                   </Button>
@@ -445,7 +500,10 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                     type="button"
                     size="sm"
                     variant="ghost"
-                    onClick={() => folderInputRef.current?.click()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      folderInputRef.current?.click();
+                    }}
                   >
                     <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
                     Select Folder
@@ -491,9 +549,15 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                     </AnimatePresence>
                   </div>
 
-                  <Button variant="primary" className="w-full" onClick={startSendSession}>
-                    Create Pairing Session
-                  </Button>
+                  {remotePeer && role === 'sender' ? (
+                    <Button variant="primary" className="w-full" onClick={sendManifestWhenReady}>
+                      Send Files to {remotePeer.deviceName}
+                    </Button>
+                  ) : (
+                    <Button variant="primary" className="w-full" onClick={startSendSession}>
+                      Create Pairing Session
+                    </Button>
+                  )}
                 </div>
               )}
             </motion.div>

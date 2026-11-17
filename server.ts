@@ -12,7 +12,7 @@ const SESSION_TTL_MS = parseInt(process.env.DROPZERO_SESSION_TTL_MS || '600000',
 const MAX_MSGS_PER_WINDOW = parseInt(process.env.DROPZERO_MAX_SIGNALING_RATE || '120', 10);
 const RATE_WINDOW_MS = 10_000;
 const MAX_SIGNAL_PAYLOAD_BYTES = 256 * 1024;
-const MAX_RELAY_FRAME_BYTES = 1536 * 1024;
+const MAX_RELAY_FRAME_BYTES = 2 * 1024 * 1024;
 
 interface PeerInfo {
   peerId: string;
@@ -44,6 +44,7 @@ const sessionsByCode = new Map<string, PairingSession>();
 const sessionsById = new Map<string, PairingSession>();
 const clientSessions = new Map<WebSocket, string>();
 const rateBuckets = new Map<WebSocket, RateBucket>();
+const connectedClients = new Set<WebSocket>();
 const serverStartedAt = Date.now();
 
 function checkRateLimit(ws: WebSocket): boolean {
@@ -65,52 +66,6 @@ function sendJson(ws: WebSocket, payload: Record<string, unknown>) {
     ws.send(JSON.stringify(payload));
   }
 }
-
-function cleanupPeer(ws: WebSocket, reason = 'peer_disconnected') {
-  rateBuckets.delete(ws);
-  const sessionId = clientSessions.get(ws);
-  if (!sessionId) return;
-  clientSessions.delete(ws);
-
-  const session = sessionsById.get(sessionId);
-  if (!session) return;
-
-  if (session.host.ws === ws) {
-    if (session.guest) {
-      sendJson(session.guest.ws, {
-        type: 'session:ended',
-        sessionId: session.sessionId,
-        reason,
-      });
-      clientSessions.delete(session.guest.ws);
-    }
-    sessionsById.delete(session.sessionId);
-    sessionsByCode.delete(session.pairingCode);
-  } else if (session.guest && session.guest.ws === ws) {
-    session.guest = null;
-    sendJson(session.host.ws, {
-      type: 'peer:left',
-      sessionId: session.sessionId,
-      reason,
-    });
-  }
-}
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [sessionId, session] of sessionsById.entries()) {
-    if (now > session.expiresAt) {
-      sendJson(session.host.ws, { type: 'session:expired', sessionId });
-      if (session.guest) {
-        sendJson(session.guest.ws, { type: 'session:expired', sessionId });
-        clientSessions.delete(session.guest.ws);
-      }
-      clientSessions.delete(session.host.ws);
-      sessionsById.delete(sessionId);
-      sessionsByCode.delete(session.pairingCode);
-    }
-  }
-}, 15_000).unref();
 
 function getPublicDiscoverableSessions() {
   const now = Date.now();
@@ -137,6 +92,69 @@ function getPublicDiscoverableSessions() {
   }
   return list;
 }
+
+function broadcastDiscovery() {
+  const sessions = getPublicDiscoverableSessions();
+  for (const client of connectedClients) {
+    if (client.readyState === WebSocket.OPEN) {
+      sendJson(client, {
+        type: 'discovery:sessions',
+        sessions,
+      });
+    }
+  }
+}
+
+function cleanupPeer(ws: WebSocket, reason = 'peer_disconnected') {
+  rateBuckets.delete(ws);
+  const sessionId = clientSessions.get(ws);
+  if (!sessionId) return;
+  clientSessions.delete(ws);
+
+  const session = sessionsById.get(sessionId);
+  if (!session) return;
+
+  if (session.host.ws === ws) {
+    if (session.guest) {
+      sendJson(session.guest.ws, {
+        type: 'session:ended',
+        sessionId: session.sessionId,
+        reason,
+      });
+      clientSessions.delete(session.guest.ws);
+    }
+    sessionsById.delete(session.sessionId);
+    sessionsByCode.delete(session.pairingCode);
+    broadcastDiscovery();
+  } else if (session.guest && session.guest.ws === ws) {
+    session.guest = null;
+    sendJson(session.host.ws, {
+      type: 'peer:left',
+      sessionId: session.sessionId,
+      reason,
+    });
+    broadcastDiscovery();
+  }
+}
+
+setInterval(() => {
+  const now = Date.now();
+  let expiredAny = false;
+  for (const [sessionId, session] of sessionsById.entries()) {
+    if (now > session.expiresAt) {
+      expiredAny = true;
+      sendJson(session.host.ws, { type: 'session:expired', sessionId });
+      if (session.guest) {
+        sendJson(session.guest.ws, { type: 'session:expired', sessionId });
+        clientSessions.delete(session.guest.ws);
+      }
+      clientSessions.delete(session.host.ws);
+      sessionsById.delete(sessionId);
+      sessionsByCode.delete(session.pairingCode);
+    }
+  }
+  if (expiredAny) broadcastDiscovery();
+}, 15_000).unref();
 
 async function startServer() {
   const app = express();
@@ -183,6 +201,12 @@ async function startServer() {
   });
 
   wss.on('connection', (ws: WebSocket) => {
+    connectedClients.add(ws);
+    sendJson(ws, {
+      type: 'discovery:sessions',
+      sessions: getPublicDiscoverableSessions(),
+    });
+
     ws.on('message', (rawData, isBinary) => {
       if (!checkRateLimit(ws)) {
         sendJson(ws, {
@@ -206,11 +230,11 @@ async function startServer() {
       }
 
       const text = rawData.toString('utf8');
-      if (text.length > MAX_SIGNAL_PAYLOAD_BYTES) {
+      if (text.length > MAX_RELAY_FRAME_BYTES) {
         sendJson(ws, {
           type: 'error',
           code: 'PAYLOAD_TOO_LARGE',
-          message: 'Signaling message exceeds allowed bounds.',
+          message: 'Frame exceeds maximum allowed bounds.',
         });
         return;
       }
@@ -228,6 +252,14 @@ async function startServer() {
       }
 
       const type = typeof msg.type === 'string' ? msg.type : '';
+      if (type !== 'relay:packet' && text.length > MAX_SIGNAL_PAYLOAD_BYTES) {
+        sendJson(ws, {
+          type: 'error',
+          code: 'PAYLOAD_TOO_LARGE',
+          message: 'Signaling message exceeds allowed bounds.',
+        });
+        return;
+      }
 
       switch (type) {
         case 'ping':
@@ -302,6 +334,7 @@ async function startServer() {
             peerId,
             expiresAt,
           });
+          broadcastDiscovery();
           break;
         }
 
@@ -382,6 +415,7 @@ async function startServer() {
               capabilities: guest.capabilities,
             },
           });
+          broadcastDiscovery();
           break;
         }
 
@@ -431,8 +465,14 @@ async function startServer() {
       }
     });
 
-    ws.on('close', () => cleanupPeer(ws, 'socket_closed'));
-    ws.on('error', () => cleanupPeer(ws, 'socket_error'));
+    ws.on('close', () => {
+      connectedClients.delete(ws);
+      cleanupPeer(ws, 'socket_closed');
+    });
+    ws.on('error', () => {
+      connectedClients.delete(ws);
+      cleanupPeer(ws, 'socket_error');
+    });
   });
 
   httpServer.listen(PORT, '0.0.0.0', () => {

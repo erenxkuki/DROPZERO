@@ -89,6 +89,13 @@ interface ActiveMetricsTracker {
   totalBytes: number;
 }
 
+interface SignalingTransport {
+  kind: 'ws' | 'http';
+  send: (payload: Record<string, unknown>) => Promise<void>;
+  close: () => void;
+  isOpen: () => boolean;
+}
+
 interface TransferContextValue {
   state: TransferState;
   role: 'sender' | 'receiver' | null;
@@ -272,8 +279,8 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
   const [rememberedDevices, setRememberedDevices] = useState<RememberedDevice[]>([]);
   const [logs, setLogs] = useState<DiagnosticLogEntry[]>([]);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const wsConnectPromiseRef = useRef<Promise<WebSocket> | null>(null);
+  const signalingRef = useRef<SignalingTransport | null>(null);
+  const signalingConnectPromiseRef = useRef<Promise<SignalingTransport> | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const controlChannelRef = useRef<RTCDataChannel | null>(null);
@@ -426,14 +433,14 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
       } catch {}
       pcRef.current = null;
     }
-    if (wsRef.current) {
+    if (signalingRef.current) {
       try {
-        if (wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: 'session:leave' }));
+        if (signalingRef.current.isOpen()) {
+          void signalingRef.current.send({ type: 'session:leave' });
         }
         if (closeSignaling) {
-          wsRef.current.close();
-          wsRef.current = null;
+          signalingRef.current.close();
+          signalingRef.current = null;
           setSignalingConnected(false);
         }
       } catch {}
@@ -452,20 +459,18 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
       dc.send(JSON.stringify(payload));
       return;
     }
-    const ws = wsRef.current;
+    const sig = signalingRef.current;
     const key = aesKeyRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN && key) {
+    if (sig && sig.isOpen() && key) {
       const bytes = new TextEncoder().encode(JSON.stringify({ kind: 'ctrl', body: payload }));
       const enc = await encryptRelayFrame(key, bytes);
       relaySeqRef.current += 1;
-      ws.send(
-        JSON.stringify({
-          type: 'relay:packet',
-          seq: relaySeqRef.current,
-          iv: enc.iv,
-          ciphertext: enc.ciphertext,
-        })
-      );
+      await sig.send({
+        type: 'relay:packet',
+        seq: relaySeqRef.current,
+        iv: enc.iv,
+        ciphertext: enc.ciphertext,
+      });
     }
   }, []);
 
@@ -691,9 +696,9 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
             const frame = encodeChunkFrame(fileIdx, chunkIdx, chunkDigest, chunkBytes);
 
             if (transportModeRef.current === 'ws-encrypted-relay') {
-              const ws = wsRef.current;
+              const sig = signalingRef.current;
               const key = aesKeyRef.current;
-              if (!ws || ws.readyState !== WebSocket.OPEN || !key) {
+              if (!sig || !sig.isOpen() || !key) {
                 throw new DropZeroError('TRANSPORT_FAILED', 'Relay connection unavailable', true);
               }
               const payloadWrapper = new Uint8Array(1 + frame.length);
@@ -701,17 +706,12 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
               payloadWrapper.set(frame, 1);
               const enc = await encryptRelayFrame(key, payloadWrapper);
               relaySeqRef.current += 1;
-              ws.send(
-                JSON.stringify({
-                  type: 'relay:packet',
-                  seq: relaySeqRef.current,
-                  iv: enc.iv,
-                  ciphertext: enc.ciphertext,
-                })
-              );
-              if (ws.bufferedAmount > 1024 * 1024) {
-                await new Promise((r) => setTimeout(r, 20));
-              }
+              await sig.send({
+                type: 'relay:packet',
+                seq: relaySeqRef.current,
+                iv: enc.iv,
+                ciphertext: enc.ciphertext,
+              });
             } else {
               const dc = dataChannelRef.current;
               if (!dc || dc.readyState !== 'open') {
@@ -1346,14 +1346,12 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
       }
 
       pc.onicecandidate = (ev) => {
-        if (ev.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(
-            JSON.stringify({
-              type: 'signal:relay',
-              signalType: 'ice-candidate',
-              payload: ev.candidate.toJSON(),
-            })
-          );
+        if (ev.candidate && signalingRef.current?.isOpen()) {
+          void signalingRef.current.send({
+            type: 'signal:relay',
+            signalType: 'ice-candidate',
+            payload: ev.candidate.toJSON(),
+          });
         }
       };
 
@@ -1390,7 +1388,7 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
               }
             });
           } catch {}
-        } else if (s === 'failed') {
+        } else if (s === 'failed' || s === 'disconnected') {
           if (settingsRef.current.preferredTransport !== 'webrtc-only') {
             if (iceFallbackTimerRef.current) {
               clearTimeout(iceFallbackTimerRef.current);
@@ -1398,9 +1396,11 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
             }
             transportModeRef.current = 'ws-encrypted-relay';
             setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
-            addLog('warn', 'Direct WebRTC failed; switched to E2E encrypted relay fallback');
-            if (roleRef.current === 'sender' && stateRef.current === 'CONNECTING') {
+            addLog('warn', 'Direct WebRTC failed/disconnected; switched to E2E encrypted relay fallback');
+            if (roleRef.current === 'sender' && (stateRef.current === 'CONNECTING' || stateRef.current === 'AUTHENTICATING' || stateRef.current === 'PEER_DETECTED' || stateRef.current === 'AWAITING_ACCEPTANCE')) {
               await sendManifestWhenReady();
+            } else {
+              await sendControlMessage({ type: 'TRANSPORT_SWITCH', transport: 'ws-encrypted-relay' });
             }
           } else {
             failWith(
@@ -1416,29 +1416,30 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
         const stillNegotiating =
           stateRef.current === 'CONNECTING' ||
           stateRef.current === 'AUTHENTICATING' ||
-          stateRef.current === 'PEER_DETECTED';
+          stateRef.current === 'PEER_DETECTED' ||
+          stateRef.current === 'AWAITING_ACCEPTANCE';
         if (!dcOpen && stillNegotiating && settingsRef.current.preferredTransport !== 'webrtc-only') {
           transportModeRef.current = 'ws-encrypted-relay';
           setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
           addLog('warn', 'Direct WebRTC timed out; switched to E2E encrypted relay fallback');
-          if (roleRef.current === 'sender') {
+          if (roleRef.current === 'sender' && (stateRef.current === 'CONNECTING' || stateRef.current === 'AUTHENTICATING' || stateRef.current === 'PEER_DETECTED' || stateRef.current === 'AWAITING_ACCEPTANCE')) {
             await sendManifestWhenReady();
+          } else {
+            await sendControlMessage({ type: 'TRANSPORT_SWITCH', transport: 'ws-encrypted-relay' });
           }
         }
-      }, 4000);
+      }, 2500);
 
       try {
         if (isInitiator) {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(
-              JSON.stringify({
-                type: 'signal:relay',
-                signalType: 'offer',
-                payload: pc.localDescription,
-              })
-            );
+          if (signalingRef.current?.isOpen()) {
+            await signalingRef.current.send({
+              type: 'signal:relay',
+              signalType: 'offer',
+              payload: pc.localDescription,
+            });
           }
           if (pendingAnswerRef.current) {
             const ans = pendingAnswerRef.current;
@@ -1453,14 +1454,12 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
           await flushPendingIce(pc);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(
-              JSON.stringify({
-                type: 'signal:relay',
-                signalType: 'answer',
-                payload: pc.localDescription,
-              })
-            );
+          if (signalingRef.current?.isOpen()) {
+            await signalingRef.current.send({
+              type: 'signal:relay',
+              signalType: 'answer',
+              payload: pc.localDescription,
+            });
           }
         }
       } catch (err) {
@@ -1487,277 +1486,398 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
-  const connectSignaling = useCallback((): Promise<WebSocket> => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      return Promise.resolve(wsRef.current);
+  const handleSignalingServerMessage = useCallback(
+    async (msg: Record<string, unknown>, transport: SignalingTransport) => {
+      const type = typeof msg.type === 'string' ? msg.type : '';
+      switch (type) {
+        case 'pong':
+          break;
+
+        case 'discovery:sessions':
+          setDiscoverableSessions((msg.sessions as DiscoverableSession[]) || []);
+          break;
+
+        case 'session:created':
+          sessionIdRef.current = String(msg.sessionId);
+          setSessionId(String(msg.sessionId));
+          setPairingCode(String(msg.pairingCode));
+          setPairingExpiresAt(Number(msg.expiresAt));
+          transitionState('WAITING_FOR_PEER');
+          break;
+
+        case 'peer:joined': {
+          const peer = msg.remotePeer as RemotePeerMetadata;
+          remotePeerRef.current = peer;
+          setRemotePeer(peer);
+          transitionState('PEER_DETECTED');
+          transitionState('AUTHENTICATING');
+
+          if (ephemeralRef.current && sessionIdRef.current) {
+            const sec = await deriveSessionSecurity(
+              ephemeralRef.current.keyPair.privateKey,
+              ephemeralRef.current.publicKeyJwk,
+              peer.publicKeyJwk,
+              sessionIdRef.current
+            );
+            aesKeyRef.current = sec.aesKey;
+            setSasCode(sec.sasCode);
+            setRemotePeer((prev) =>
+              prev ? { ...prev, fingerprint: sec.remoteFingerprint } : prev
+            );
+            if (settingsRef.current.rememberDevices) {
+              await saveRememberedDevice({
+                id: sec.remoteFingerprint,
+                deviceName: peer.deviceName,
+                deviceType: peer.deviceType,
+                platform: peer.platform,
+                fingerprint: sec.remoteFingerprint,
+                lastSessionAt: Date.now(),
+                capabilities: peer.capabilities,
+              });
+              setRememberedDevices(await getRememberedDevices());
+            }
+          }
+          await setupWebRTC(true);
+          break;
+        }
+
+        case 'session:joined': {
+          const sId = String(msg.sessionId);
+          const peer = msg.remotePeer as RemotePeerMetadata;
+          const hostMode = msg.mode === 'receive' ? 'receive' : 'send';
+          const resolvedRole = hostMode === 'send' ? 'receiver' : 'sender';
+          roleRef.current = resolvedRole;
+          setRole(resolvedRole);
+
+          sessionIdRef.current = sId;
+          setSessionId(sId);
+          setPairingCode(String(msg.pairingCode));
+          setPairingExpiresAt(Number(msg.expiresAt));
+          remotePeerRef.current = peer;
+          setRemotePeer(peer);
+
+          transitionState('PEER_DETECTED');
+          transitionState('AUTHENTICATING');
+
+          if (ephemeralRef.current) {
+            const sec = await deriveSessionSecurity(
+              ephemeralRef.current.keyPair.privateKey,
+              ephemeralRef.current.publicKeyJwk,
+              peer.publicKeyJwk,
+              sId
+            );
+            aesKeyRef.current = sec.aesKey;
+            setSasCode(sec.sasCode);
+            setRemotePeer((prev) =>
+              prev ? { ...prev, fingerprint: sec.remoteFingerprint } : prev
+            );
+            if (settingsRef.current.rememberDevices) {
+              await saveRememberedDevice({
+                id: sec.remoteFingerprint,
+                deviceName: peer.deviceName,
+                deviceType: peer.deviceType,
+                platform: peer.platform,
+                fingerprint: sec.remoteFingerprint,
+                lastSessionAt: Date.now(),
+                capabilities: peer.capabilities,
+              });
+              setRememberedDevices(await getRememberedDevices());
+            }
+          }
+          await setupWebRTC(false);
+          break;
+        }
+
+        case 'signal:relay': {
+          const pc = pcRef.current;
+          const signalType = msg.signalType;
+          if (!pc) {
+            if (signalType === 'offer') {
+              pendingOfferRef.current = msg.payload as RTCSessionDescriptionInit;
+            } else if (signalType === 'answer') {
+              pendingAnswerRef.current = msg.payload as RTCSessionDescriptionInit;
+            } else if (signalType === 'ice-candidate' && msg.payload) {
+              pendingIceCandidatesRef.current.push(msg.payload as RTCIceCandidateInit);
+            }
+            return;
+          }
+          try {
+            if (signalType === 'offer') {
+              await pc.setRemoteDescription(
+                new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit)
+              );
+              await flushPendingIce(pc);
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              await transport.send({
+                type: 'signal:relay',
+                signalType: 'answer',
+                payload: pc.localDescription,
+              });
+            } else if (signalType === 'answer') {
+              await pc.setRemoteDescription(
+                new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit)
+              );
+              await flushPendingIce(pc);
+            } else if (signalType === 'ice-candidate' && msg.payload) {
+              if (!pc.remoteDescription) {
+                pendingIceCandidatesRef.current.push(msg.payload as RTCIceCandidateInit);
+              } else {
+                await pc.addIceCandidate(new RTCIceCandidate(msg.payload as RTCIceCandidateInit));
+              }
+            }
+          } catch {}
+          break;
+        }
+
+        case 'relay:packet': {
+          const key = aesKeyRef.current;
+          if (!key) return;
+          if (transportModeRef.current === 'unavailable') {
+            transportModeRef.current = 'ws-encrypted-relay';
+            setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
+          }
+          try {
+            const plain = await decryptRelayFrame(key, String(msg.iv), String(msg.ciphertext));
+            if (plain[0] === 0x01) {
+              await handleIncomingBinaryChunk(plain.subarray(1));
+            } else {
+              const decoded = JSON.parse(new TextDecoder().decode(plain)) as {
+                kind: string;
+                body: Record<string, unknown>;
+              };
+              if (decoded.kind === 'ctrl') {
+                await handleControlMessage(decoded.body);
+              }
+            }
+          } catch {
+            failWith('AUTHENTICATION_FAILED', 'Failed to decrypt authenticated relay frame.');
+          }
+          break;
+        }
+
+        case 'peer:left':
+        case 'session:ended':
+          if (stateRef.current !== 'COMPLETED' && stateRef.current !== 'IDLE') {
+            failWith('TRANSPORT_FAILED', 'Remote peer disconnected from session.', true);
+          }
+          break;
+
+        case 'session:expired':
+          failWith('SESSION_EXPIRED', 'Pairing session expired after inactivity.');
+          break;
+
+        case 'error': {
+          const code = String(msg.code || 'TRANSPORT_FAILED') as DropZeroErrorCode;
+          const message = String(msg.message || 'Signaling error');
+          failWith(
+            code === 'PEER_NOT_FOUND' || code === 'PAIRING_EXPIRED' ? code : 'TRANSPORT_FAILED',
+            message
+          );
+          break;
+        }
+      }
+    },
+    [failWith, flushPendingIce, handleControlMessage, handleIncomingBinaryChunk, setupWebRTC, transitionState]
+  );
+
+  const connectHttpSignaling = useCallback(async (): Promise<SignalingTransport> => {
+    const res = await fetch('/api/signaling/connect', { method: 'POST' });
+    if (!res.ok) {
+      throw new DropZeroError('NETWORK_UNAVAILABLE', 'Failed to reach HTTPS signaling endpoint');
     }
-    if (wsConnectPromiseRef.current && wsRef.current?.readyState === WebSocket.CONNECTING) {
-      return wsConnectPromiseRef.current;
+    const data = (await res.json()) as { ok?: boolean; clientId?: string };
+    if (!data.ok || !data.clientId) {
+      throw new DropZeroError('NETWORK_UNAVAILABLE', 'Invalid signaling handshake response');
     }
 
-    const promise = new Promise<WebSocket>((resolve, reject) => {
+    const clientId = data.clientId;
+    let active = true;
+    const abortCtrl = new AbortController();
+
+    const transport: SignalingTransport = {
+      kind: 'http',
+      isOpen: () => active,
+      send: async (payload) => {
+        if (!active) throw new DropZeroError('NETWORK_UNAVAILABLE', 'Signaling channel closed');
+        const sendRes = await fetch('/api/signaling/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId, message: payload }),
+        });
+        if (sendRes.status === 404) {
+          active = false;
+          if (signalingRef.current === transport) signalingRef.current = null;
+          setSignalingConnected(false);
+          throw new DropZeroError('NETWORK_UNAVAILABLE', 'Signaling session expired on server');
+        }
+        if (!sendRes.ok) {
+          throw new DropZeroError('NETWORK_UNAVAILABLE', 'Failed sending signaling packet');
+        }
+      },
+      close: () => {
+        if (!active) return;
+        active = false;
+        abortCtrl.abort();
+        try {
+          if (navigator.sendBeacon) {
+            navigator.sendBeacon(
+              '/api/signaling/disconnect',
+              new Blob([JSON.stringify({ clientId })], { type: 'application/json' })
+            );
+          } else {
+            void fetch('/api/signaling/disconnect', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ clientId }),
+              keepalive: true,
+            });
+          }
+        } catch {}
+      },
+    };
+
+    signalingRef.current = transport;
+    setSignalingConnected(true);
+    addLog('info', 'Connected to DROPZERO signaling (HTTPS)');
+
+    (async () => {
+      while (active) {
+        try {
+          const pollRes = await fetch(
+            `/api/signaling/poll?clientId=${encodeURIComponent(clientId)}`,
+            { signal: abortCtrl.signal, cache: 'no-store' }
+          );
+          if (pollRes.status === 404) {
+            active = false;
+            if (signalingRef.current === transport) signalingRef.current = null;
+            setSignalingConnected(false);
+            break;
+          }
+          if (!pollRes.ok) {
+            await new Promise((r) => setTimeout(r, 800));
+            continue;
+          }
+          const payload = (await pollRes.json()) as {
+            messages?: Array<Record<string, unknown>>;
+          };
+          if (Array.isArray(payload.messages)) {
+            for (const msg of payload.messages) {
+              await handleSignalingServerMessage(msg, transport);
+            }
+          }
+        } catch (err) {
+          if (!active || (err instanceof DOMException && err.name === 'AbortError')) break;
+          await new Promise((r) => setTimeout(r, 800));
+        }
+      }
+    })();
+
+    await transport.send({ type: 'discovery:list' }).catch(() => {});
+    return transport;
+  }, [addLog, handleSignalingServerMessage]);
+
+  const connectSignaling = useCallback((): Promise<SignalingTransport> => {
+    if (signalingRef.current && signalingRef.current.isOpen()) {
+      return Promise.resolve(signalingRef.current);
+    }
+    if (signalingConnectPromiseRef.current) {
+      return signalingConnectPromiseRef.current;
+    }
+
+    const promise = (async (): Promise<SignalingTransport> => {
       const url = getSignalingWsUrl();
-      if (!url) {
-        reject(new DropZeroError('NETWORK_UNAVAILABLE', 'Signaling URL unavailable'));
-        return;
+      if (url && typeof WebSocket !== 'undefined') {
+        try {
+          const wsTransport = await new Promise<SignalingTransport>((resolve, reject) => {
+            const ws = new WebSocket(url);
+            let settled = false;
+
+            const timeout = setTimeout(() => {
+              if (!settled) {
+                settled = true;
+                try {
+                  ws.close();
+                } catch {}
+                reject(new Error('WS timeout'));
+              }
+            }, 2500);
+
+            const transport: SignalingTransport = {
+              kind: 'ws',
+              isOpen: () => ws.readyState === WebSocket.OPEN,
+              send: async (payload) => {
+                if (ws.readyState !== WebSocket.OPEN) {
+                  throw new DropZeroError('NETWORK_UNAVAILABLE', 'WebSocket not open');
+                }
+                ws.send(JSON.stringify(payload));
+              },
+              close: () => {
+                try {
+                  ws.close();
+                } catch {}
+              },
+            };
+
+            ws.onopen = () => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timeout);
+              signalingRef.current = transport;
+              setSignalingConnected(true);
+              addLog('info', 'Connected to DROPZERO signaling');
+              ws.send(JSON.stringify({ type: 'discovery:list' }));
+              resolve(transport);
+            };
+
+            ws.onerror = () => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timeout);
+              reject(new Error('WS error'));
+            };
+
+            ws.onclose = () => {
+              if (!settled) {
+                settled = true;
+                clearTimeout(timeout);
+                reject(new Error('WS closed'));
+              }
+              if (signalingRef.current === transport) {
+                signalingRef.current = null;
+                setSignalingConnected(false);
+              }
+            };
+
+            ws.onmessage = async (event) => {
+              if (typeof event.data !== 'string') return;
+              try {
+                const msg = JSON.parse(event.data) as Record<string, unknown>;
+                await handleSignalingServerMessage(msg, transport);
+              } catch {}
+            };
+          });
+          return wsTransport;
+        } catch {
+          // Proxy or firewall rejected WebSocket upgrade; transparently switch to HTTPS long-poll
+        }
       }
 
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
-
-      const timeout = setTimeout(() => {
-        if (ws.readyState !== WebSocket.OPEN) {
-          ws.close();
-          wsConnectPromiseRef.current = null;
-          reject(new DropZeroError('NETWORK_UNAVAILABLE', 'Signaling server timed out'));
-        }
-      }, 8000);
-
-      ws.onopen = () => {
-        clearTimeout(timeout);
-        wsConnectPromiseRef.current = null;
-        setSignalingConnected(true);
-        addLog('info', 'Connected to DROPZERO signaling');
-        ws.send(JSON.stringify({ type: 'discovery:list' }));
-        resolve(ws);
-      };
-
-      ws.onerror = () => {
-        clearTimeout(timeout);
-        wsConnectPromiseRef.current = null;
-        setSignalingConnected(false);
-        reject(new DropZeroError('NETWORK_UNAVAILABLE', 'Failed to reach signaling server'));
-      };
-
-      ws.onclose = () => {
-        wsConnectPromiseRef.current = null;
-        if (wsRef.current === ws) {
-          wsRef.current = null;
-        }
-        setSignalingConnected(false);
-      };
-
-      ws.onmessage = async (event) => {
-        if (typeof event.data !== 'string') return;
-        let msg: Record<string, unknown>;
-        try {
-          msg = JSON.parse(event.data) as Record<string, unknown>;
-        } catch {
-          return;
-        }
-
-        const type = typeof msg.type === 'string' ? msg.type : '';
-        switch (type) {
-          case 'pong':
-            break;
-
-          case 'discovery:sessions':
-            setDiscoverableSessions((msg.sessions as DiscoverableSession[]) || []);
-            break;
-
-          case 'session:created':
-            sessionIdRef.current = String(msg.sessionId);
-            setSessionId(String(msg.sessionId));
-            setPairingCode(String(msg.pairingCode));
-            setPairingExpiresAt(Number(msg.expiresAt));
-            transitionState('WAITING_FOR_PEER');
-            break;
-
-          case 'peer:joined': {
-            const peer = msg.remotePeer as RemotePeerMetadata;
-            remotePeerRef.current = peer;
-            setRemotePeer(peer);
-            transitionState('PEER_DETECTED');
-            transitionState('AUTHENTICATING');
-
-            if (ephemeralRef.current && sessionIdRef.current) {
-              const sec = await deriveSessionSecurity(
-                ephemeralRef.current.keyPair.privateKey,
-                ephemeralRef.current.publicKeyJwk,
-                peer.publicKeyJwk,
-                sessionIdRef.current
-              );
-              aesKeyRef.current = sec.aesKey;
-              setSasCode(sec.sasCode);
-              setRemotePeer((prev) =>
-                prev ? { ...prev, fingerprint: sec.remoteFingerprint } : prev
-              );
-              if (settingsRef.current.rememberDevices) {
-                await saveRememberedDevice({
-                  id: sec.remoteFingerprint,
-                  deviceName: peer.deviceName,
-                  deviceType: peer.deviceType,
-                  platform: peer.platform,
-                  fingerprint: sec.remoteFingerprint,
-                  lastSessionAt: Date.now(),
-                  capabilities: peer.capabilities,
-                });
-                setRememberedDevices(await getRememberedDevices());
-              }
-            }
-            await setupWebRTC(true);
-            break;
-          }
-
-          case 'session:joined': {
-            const sId = String(msg.sessionId);
-            const peer = msg.remotePeer as RemotePeerMetadata;
-            const hostMode = msg.mode === 'receive' ? 'receive' : 'send';
-            const resolvedRole = hostMode === 'send' ? 'receiver' : 'sender';
-            roleRef.current = resolvedRole;
-            setRole(resolvedRole);
-
-            sessionIdRef.current = sId;
-            setSessionId(sId);
-            setPairingCode(String(msg.pairingCode));
-            setPairingExpiresAt(Number(msg.expiresAt));
-            remotePeerRef.current = peer;
-            setRemotePeer(peer);
-
-            transitionState('PEER_DETECTED');
-            transitionState('AUTHENTICATING');
-
-            if (ephemeralRef.current) {
-              const sec = await deriveSessionSecurity(
-                ephemeralRef.current.keyPair.privateKey,
-                ephemeralRef.current.publicKeyJwk,
-                peer.publicKeyJwk,
-                sId
-              );
-              aesKeyRef.current = sec.aesKey;
-              setSasCode(sec.sasCode);
-              setRemotePeer((prev) =>
-                prev ? { ...prev, fingerprint: sec.remoteFingerprint } : prev
-              );
-              if (settingsRef.current.rememberDevices) {
-                await saveRememberedDevice({
-                  id: sec.remoteFingerprint,
-                  deviceName: peer.deviceName,
-                  deviceType: peer.deviceType,
-                  platform: peer.platform,
-                  fingerprint: sec.remoteFingerprint,
-                  lastSessionAt: Date.now(),
-                  capabilities: peer.capabilities,
-                });
-                setRememberedDevices(await getRememberedDevices());
-              }
-            }
-            await setupWebRTC(false);
-            break;
-          }
-
-          case 'signal:relay': {
-            const pc = pcRef.current;
-            const signalType = msg.signalType;
-            if (!pc) {
-              if (signalType === 'offer') {
-                pendingOfferRef.current = msg.payload as RTCSessionDescriptionInit;
-              } else if (signalType === 'answer') {
-                pendingAnswerRef.current = msg.payload as RTCSessionDescriptionInit;
-              } else if (signalType === 'ice-candidate' && msg.payload) {
-                pendingIceCandidatesRef.current.push(msg.payload as RTCIceCandidateInit);
-              }
-              return;
-            }
-            try {
-              if (signalType === 'offer') {
-                await pc.setRemoteDescription(
-                  new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit)
-                );
-                await flushPendingIce(pc);
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                ws.send(
-                  JSON.stringify({
-                    type: 'signal:relay',
-                    signalType: 'answer',
-                    payload: pc.localDescription,
-                  })
-                );
-              } else if (signalType === 'answer') {
-                await pc.setRemoteDescription(
-                  new RTCSessionDescription(msg.payload as RTCSessionDescriptionInit)
-                );
-                await flushPendingIce(pc);
-              } else if (signalType === 'ice-candidate' && msg.payload) {
-                if (!pc.remoteDescription) {
-                  pendingIceCandidatesRef.current.push(msg.payload as RTCIceCandidateInit);
-                } else {
-                  await pc.addIceCandidate(new RTCIceCandidate(msg.payload as RTCIceCandidateInit));
-                }
-              }
-            } catch {}
-            break;
-          }
-
-          case 'relay:packet': {
-            const key = aesKeyRef.current;
-            if (!key) return;
-            if (transportModeRef.current === 'unavailable') {
-              transportModeRef.current = 'ws-encrypted-relay';
-              setMetrics((prev) => ({ ...prev, transport: 'ws-encrypted-relay' }));
-            }
-            try {
-              const plain = await decryptRelayFrame(key, String(msg.iv), String(msg.ciphertext));
-              if (plain[0] === 0x01) {
-                await handleIncomingBinaryChunk(plain.subarray(1));
-              } else {
-                const decoded = JSON.parse(new TextDecoder().decode(plain)) as {
-                  kind: string;
-                  body: Record<string, unknown>;
-                };
-                if (decoded.kind === 'ctrl') {
-                  await handleControlMessage(decoded.body);
-                }
-              }
-            } catch {
-              failWith('AUTHENTICATION_FAILED', 'Failed to decrypt authenticated relay frame.');
-            }
-            break;
-          }
-
-          case 'peer:left':
-          case 'session:ended':
-            if (stateRef.current !== 'COMPLETED' && stateRef.current !== 'IDLE') {
-              failWith('TRANSPORT_FAILED', 'Remote peer disconnected from session.', true);
-            }
-            break;
-
-          case 'session:expired':
-            failWith('SESSION_EXPIRED', 'Pairing session expired after inactivity.');
-            break;
-
-          case 'error': {
-            const code = String(msg.code || 'TRANSPORT_FAILED') as DropZeroErrorCode;
-            const message = String(msg.message || 'Signaling error');
-            failWith(
-              code === 'PEER_NOT_FOUND' || code === 'PAIRING_EXPIRED' ? code : 'TRANSPORT_FAILED',
-              message
-            );
-            break;
-          }
-        }
-      };
+      return await connectHttpSignaling();
+    })().finally(() => {
+      signalingConnectPromiseRef.current = null;
     });
 
-    wsConnectPromiseRef.current = promise;
+    signalingConnectPromiseRef.current = promise;
     return promise;
-  }, [
-    addLog,
-    failWith,
-    flushPendingIce,
-    handleControlMessage,
-    handleIncomingBinaryChunk,
-    setupWebRTC,
-    transitionState,
-  ]);
+  }, [addLog, connectHttpSignaling, handleSignalingServerMessage]);
 
   useEffect(() => {
     connectSignaling().catch(() => {});
     const pingTimer = setInterval(() => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'ping' }));
-      } else if (!wsRef.current) {
+      if (signalingRef.current && signalingRef.current.isOpen()) {
+        void signalingRef.current.send({ type: 'ping' }).catch(() => {});
+      } else {
         connectSignaling().catch(() => {});
       }
     }, 25_000);
@@ -1793,22 +1913,20 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
       const identity = await generateEphemeralIdentity();
       ephemeralRef.current = identity;
       const code = generatePairingCode();
-      const ws = await connectSignaling();
-      ws.send(
-        JSON.stringify({
-          type: 'session:create',
-          mode: 'send',
-          pairingCode: code,
-          discoverable: settingsRef.current.discoverableOnSignaling,
-          device: {
-            name: localDeviceRef.current.deviceName,
-            type: localDeviceRef.current.deviceType,
-            platform: localDeviceRef.current.platform,
-            capabilities: localDeviceRef.current.capabilities,
-          },
-          publicKeyJwk: identity.publicKeyJwk,
-        })
-      );
+      const sig = await connectSignaling();
+      await sig.send({
+        type: 'session:create',
+        mode: 'send',
+        pairingCode: code,
+        discoverable: settingsRef.current.discoverableOnSignaling,
+        device: {
+          name: localDeviceRef.current.deviceName,
+          type: localDeviceRef.current.deviceType,
+          platform: localDeviceRef.current.platform,
+          capabilities: localDeviceRef.current.capabilities,
+        },
+        publicKeyJwk: identity.publicKeyJwk,
+      });
     } catch (err) {
       failWith(
         err instanceof DropZeroError ? err.code : 'NETWORK_UNAVAILABLE',
@@ -1843,22 +1961,20 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
       const identity = await generateEphemeralIdentity();
       ephemeralRef.current = identity;
       const code = generatePairingCode();
-      const ws = await connectSignaling();
-      ws.send(
-        JSON.stringify({
-          type: 'session:create',
-          mode: 'receive',
-          pairingCode: code,
-          discoverable: settingsRef.current.discoverableOnSignaling,
-          device: {
-            name: localDeviceRef.current.deviceName,
-            type: localDeviceRef.current.deviceType,
-            platform: localDeviceRef.current.platform,
-            capabilities: localDeviceRef.current.capabilities,
-          },
-          publicKeyJwk: identity.publicKeyJwk,
-        })
-      );
+      const sig = await connectSignaling();
+      await sig.send({
+        type: 'session:create',
+        mode: 'receive',
+        pairingCode: code,
+        discoverable: settingsRef.current.discoverableOnSignaling,
+        device: {
+          name: localDeviceRef.current.deviceName,
+          type: localDeviceRef.current.deviceType,
+          platform: localDeviceRef.current.platform,
+          capabilities: localDeviceRef.current.capabilities,
+        },
+        publicKeyJwk: identity.publicKeyJwk,
+      });
     } catch (err) {
       failWith(
         err instanceof DropZeroError ? err.code : 'NETWORK_UNAVAILABLE',
@@ -1894,20 +2010,18 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
       try {
         const identity = await generateEphemeralIdentity();
         ephemeralRef.current = identity;
-        const ws = await connectSignaling();
-        ws.send(
-          JSON.stringify({
-            type: 'session:join',
-            pairingCode: code,
-            device: {
-              name: localDeviceRef.current.deviceName,
-              type: localDeviceRef.current.deviceType,
-              platform: localDeviceRef.current.platform,
-              capabilities: localDeviceRef.current.capabilities,
-            },
-            publicKeyJwk: identity.publicKeyJwk,
-          })
-        );
+        const sig = await connectSignaling();
+        await sig.send({
+          type: 'session:join',
+          pairingCode: code,
+          device: {
+            name: localDeviceRef.current.deviceName,
+            type: localDeviceRef.current.deviceType,
+            platform: localDeviceRef.current.platform,
+            capabilities: localDeviceRef.current.capabilities,
+          },
+          publicKeyJwk: identity.publicKeyJwk,
+        });
       } catch (err) {
         failWith(
           err instanceof DropZeroError ? err.code : 'NETWORK_UNAVAILABLE',
@@ -2000,15 +2114,15 @@ export function TransferProvider({ children }: { children: React.ReactNode }) {
   }, [teardownConnection]);
 
   const refreshDiscovery = useCallback(() => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'discovery:list' }));
+    const sig = signalingRef.current;
+    if (sig && sig.isOpen()) {
+      void sig.send({ type: 'discovery:list' }).catch(() => {});
       return;
     }
     connectSignaling()
-      .then((socket) => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'discovery:list' }));
+      .then((transport) => {
+        if (transport.isOpen()) {
+          void transport.send({ type: 'discovery:list' }).catch(() => {});
         }
       })
       .catch(() => {});

@@ -123,11 +123,18 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
 
   const handleCopyShareLink = async () => {
     if (!pairingCode || typeof window === 'undefined') return;
-    const shareUrl = `${window.location.origin}/transfer?pair=${pairingCode}`;
+    const base =
+      (import.meta.env.VITE_DROPZERO_SHARE_BASE_URL as string | undefined)?.trim() ||
+      window.location.origin;
+    const shareUrl = `${base.replace(/\/+$/, '')}/transfer?pair=${pairingCode}`;
     try {
       await navigator.clipboard.writeText(shareUrl);
       setCopiedLink(true);
-      pushToast({ title: 'Pairing link copied', description: 'Open in another browser tab or device.', tone: 'success' });
+      pushToast({
+        title: 'Pairing link copied',
+        description: shareUrl,
+        tone: 'success',
+      });
       setTimeout(() => setCopiedLink(false), 1800);
     } catch {}
   };
@@ -139,7 +146,8 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
     state === 'CREATING_SESSION' ||
     state === 'PEER_DETECTED' ||
     state === 'AUTHENTICATING' ||
-    state === 'CONNECTING';
+    state === 'CONNECTING' ||
+    state === 'AWAITING_ACCEPTANCE';
 
   const isRunningOrFinished =
     state === 'TRANSFERRING' ||
@@ -175,10 +183,17 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
         <div className="mt-4">
           <ErrorState
             code={error.code}
-            title="Transfer interrupted"
+            title={
+              error.code === 'PEER_NOT_FOUND' || error.code === 'PAIRING_EXPIRED'
+                ? 'Session not found or expired'
+                : 'Transfer interrupted'
+            }
             message={error.message}
-            onRetry={resetWorkspace}
-            retryLabel="Reset Session"
+            onRetry={() => {
+              resetWorkspace();
+              refreshDiscovery();
+            }}
+            retryLabel="Reset & Refresh Discovery"
             onSecondaryAction={
               error.recoverable ? () => switchToRelayFallback() : undefined
             }
@@ -294,11 +309,11 @@ export function TransferWidget({ initialPairCode = '', compact = false }: Transf
                 : 'Signaling metadata only — zero file bytes pass through signaling.'
             }
           />
-          {state === 'CONNECTING' && (
+          {(state === 'CONNECTING' || state === 'AUTHENTICATING' || state === 'PEER_DETECTED' || state === 'AWAITING_ACCEPTANCE') && (
             <div className="flex flex-wrap items-center justify-between gap-3">
               <Button variant="outline" size="sm" onClick={switchToRelayFallback}>
                 <Radio className="h-3.5 w-3.5" aria-hidden="true" />
-                Switch to Encrypted Relay Now
+                Switch to Encrypted Relay (Cross-Network)
               </Button>
               <Button variant="ghost" size="sm" onClick={cancelTransfer}>
                 Cancel

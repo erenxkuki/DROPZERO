@@ -130,6 +130,11 @@ export function TransferPage() {
                 </dd>
               </div>
             </dl>
+            {state === 'IDLE' && (
+              <p className="mt-3 text-[11px] text-[#8A8A8A] dark:text-[#626262] leading-relaxed border-t border-[#E5E5E5] dark:border-[#252525] pt-2.5">
+                Tip: Signaling is connected. Select files to send or enter a code to pair.
+              </p>
+            )}
           </div>
 
           <div className="rounded-lg border border-[#E5E5E5] dark:border-[#252525] bg-[#FFFFFF] dark:bg-[#111111] p-4">
